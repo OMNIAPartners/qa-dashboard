@@ -59,8 +59,9 @@ function publicUser(user) {
 }
 
 app.post("/api/auth/login", (req, res) => {
-  const { email, password } = req.body || {};
-  const user = getDb().users.find((u) => u.email.toLowerCase() === String(email || "").toLowerCase());
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = String(req.body?.password || "").trim();
+  const user = getDb().users.find((u) => u.email.toLowerCase() === email);
   if (!user || !user.active || !bcrypt.compareSync(password || "", user.passwordHash)) {
     return res.status(401).json({ message: "Invalid email or password." });
   }

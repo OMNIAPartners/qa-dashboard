@@ -29,6 +29,12 @@ export function LoginPage() {
           spacing={2}
           onSubmit={async (e) => {
             e.preventDefault();
+            const form = e.currentTarget as HTMLFormElement;
+            const data = new FormData(form);
+            const email = String(data.get("email") || "").trim();
+            const password = String(data.get("password") || "").trim();
+            setEmail(email);
+            setPassword(password);
             setBusy(true);
             setError("");
             try {
@@ -41,8 +47,8 @@ export function LoginPage() {
           }}
         >
           {error && <Alert severity="error">{error}</Alert>}
-          <TextField label="Email" value={email} onChange={(e) => setEmail(e.target.value)} fullWidth />
-          <TextField label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth />
+          <TextField name="email" label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} fullWidth required />
+          <TextField name="password" label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth required />
           <Button type="submit" variant="contained" size="large" disabled={busy}>
             Sign in
           </Button>

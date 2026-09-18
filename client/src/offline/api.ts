@@ -11,10 +11,15 @@ function publicUser(user: any): User {
 
 function load() {
   const raw = localStorage.getItem(KEY);
-  if (raw) return JSON.parse(raw);
-  const seed = createSeed();
-  localStorage.setItem(KEY, JSON.stringify(seed));
-  return seed;
+  const db = raw ? JSON.parse(raw) : createSeed();
+  const seedUsers = createSeed().users;
+  seedUsers.forEach((seedUser) => {
+    const existing = (db.users || []).find((u: any) => String(u.email || "").toLowerCase() === seedUser.email.toLowerCase());
+    if (!existing) db.users = [...(db.users || []), seedUser];
+    else if (!existing.password) existing.password = seedUser.password;
+  });
+  localStorage.setItem(KEY, JSON.stringify(db));
+  return db;
 }
 
 function save(db: any) {
@@ -45,7 +50,12 @@ function uniqueKey(row: any) {
 export const offline = {
   login(email: string, password: string) {
     const db = load();
-    const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password && u.active);
+    const normalized = String(email || "").trim().toLowerCase();
+    const pass = String(password || "").trim();
+    const candidates = normalized.includes("@") ? [normalized] : [normalized, `${normalized}@connect.qa`];
+    const user = db.users.find(
+      (u: any) => candidates.includes(String(u.email || "").toLowerCase()) && u.password === pass && u.active
+    );
     if (!user) throw { response: { data: { message: "Invalid email or password." } } };
     localStorage.setItem(SESSION, JSON.stringify(publicUser(user)));
     return { token: "offline-token", user: publicUser(user) };
