@@ -4,7 +4,7 @@ A client-ready QA reporting dashboard for Connect and Force. QA engineers enter 
 
 ## Live URL
 
-https://nida198989.github.io/qa-dashboard/
+https://omniapartners.github.io/qa-dashboard/
 
 ## Stack
 
