@@ -81,7 +81,7 @@ const numberFields: Array<{ key: keyof DailyUpdate; label: string; group: string
 
 export function DailyUpdatePage() {
   const { user } = useAuth();
-  const { users, modules, sprints, workTypes, filters, refresh } = useApp();
+  const { users, modules, sprints, workTypes, filters, refresh, applyDashboard } = useApp();
   const [form, setForm] = useState(() => ({
     ...emptyDailyUpdate(),
     date: dayjs().format("YYYY-MM-DD"),
@@ -185,8 +185,9 @@ export function DailyUpdatePage() {
               setQaName(resolved.name);
               setModuleName(module.name);
               setSprintName(sprint.sprintName);
-              setMessage(result.replaced ? "Existing daily update was refreshed with the latest values." : "Daily update saved. Dashboards will refresh now.");
+              setMessage(result.replaced ? "Existing daily update was refreshed. Dashboards now include these numbers." : "Daily update saved. Dashboards now include these numbers.");
               setExisting(true);
+              if (result.dashboard) applyDashboard(result.dashboard);
               const next = await listUpdates();
               setRows(next);
               await refresh();

@@ -1,7 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
+import isoWeek from "dayjs/plugin/isoWeek";
 import { getDashboard, getMeta } from "./api/client";
 import type { AppConfig, DashboardData, Filters, Module, Sprint, User } from "./types";
+
+dayjs.extend(isoWeek);
 
 interface AppModel {
   filters: Filters;
@@ -13,6 +16,7 @@ interface AppModel {
   workTypes: string[];
   config: AppConfig | null;
   refresh: () => Promise<void>;
+  applyDashboard: (dash: DashboardData) => void;
   loading: boolean;
   clientView: boolean;
   setClientView: (value: boolean) => void;
@@ -22,8 +26,8 @@ const Ctx = createContext<AppModel | null>(null);
 
 const defaultFilters = (): Filters => ({
   preset: "this_week",
-  startDate: dayjs().startOf("week").format("YYYY-MM-DD"),
-  endDate: dayjs().format("YYYY-MM-DD"),
+  startDate: dayjs().startOf("isoWeek").format("YYYY-MM-DD"),
+  endDate: dayjs().endOf("isoWeek").format("YYYY-MM-DD"),
   userId: "",
   moduleId: "",
   sprintId: "",
@@ -58,8 +62,24 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [filters]);
 
+  const applyDashboard = useCallback((dash: DashboardData) => {
+    setDashboard(dash);
+  }, []);
+
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, [refresh]);
 
   const value = useMemo(
@@ -73,11 +93,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       workTypes,
       config,
       refresh,
+      applyDashboard,
       loading,
       clientView,
       setClientView,
     }),
-    [filters, dashboard, users, modules, sprints, workTypes, config, refresh, loading, clientView]
+    [filters, dashboard, users, modules, sprints, workTypes, config, refresh, applyDashboard, loading, clientView]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

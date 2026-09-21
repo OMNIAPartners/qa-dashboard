@@ -32,6 +32,7 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
+import { useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
 import { downloadCsv, downloadExcel } from "../api/client";
@@ -61,9 +62,13 @@ const nav = [
 
 export function AppShell() {
   const { user, logout } = useAuth();
-  const { filters, clientView, setClientView } = useApp();
+  const { filters, clientView, setClientView, refresh } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    void refresh();
+  }, [location.pathname, refresh]);
 
   const items = nav.filter((item) => user && item.roles.includes(user.role) && !(clientView && item.hideInClient));
 
