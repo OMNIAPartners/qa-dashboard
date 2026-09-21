@@ -6,8 +6,10 @@ export function projectOf(value?: string | null): ProjectName {
 }
 
 export function pctOrNA(part?: number | null, total?: number | null) {
-  if (!total) return "N/A";
-  return `${Math.round(((part || 0) / total) * 1000) / 10}%`;
+  const done = Number(part || 0);
+  const scope = Number(total || 0);
+  if (!scope) return done > 0 ? "100%" : "0%";
+  return `${Math.round((done / scope) * 1000) / 10}%`;
 }
 
 export function deltaPct(current: number, previous: number) {

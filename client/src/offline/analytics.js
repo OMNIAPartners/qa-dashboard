@@ -124,10 +124,40 @@ function dailyTotal(row) {
   return num(row.inSprintAutomated) + num(row.backlogAutomated);
 }
 
+function entryAutomated(row) {
+  return Math.max(dailyTotal(row), num(row.uiAutomated), num(row.apiAutomated));
+}
+
 function computeTotalAutomated(uiAutomated, apiAutomated, countingMode) {
   if (countingMode === "separate_assets") return uiAutomated + apiAutomated;
   if (countingMode === "unique_max") return Math.max(uiAutomated, apiAutomated);
   return uiAutomated;
+}
+
+export function resolveAutomationTotals({
+  uiAutomated,
+  apiAutomated,
+  inSprintAutomated,
+  backlogAutomated,
+  manualWritten,
+  testCasesExecuted,
+  baselineTotalTestCases,
+  countingMode,
+}) {
+  const ui = num(uiAutomated);
+  const api = num(apiAutomated);
+  const sprintBacklog = num(inSprintAutomated) + num(backlogAutomated);
+  const fromAssets = computeTotalAutomated(ui, api, countingMode);
+  const totalAutomated = Math.max(fromAssets, sprintBacklog, ui, api);
+  const baseline = num(baselineTotalTestCases);
+  const activity = Math.max(totalAutomated, num(manualWritten), num(testCasesExecuted));
+  const totalTestCases = baseline > 0 ? Math.max(baseline, activity) : activity;
+  return {
+    totalAutomated,
+    totalTestCases,
+    remaining: Math.max(0, totalTestCases - totalAutomated),
+    coverage: pct(totalAutomated, totalTestCases),
+  };
 }
 
 export function moduleSnapshot(mod, allUpdates, config) {
@@ -138,13 +168,25 @@ export function moduleSnapshot(mod, allUpdates, config) {
   const manualWritten = num(mod.manualWritten) + sumField(rows, "manualWritten");
   const inSprintAutomated = sumField(rows, "inSprintAutomated");
   const backlogAutomated = sumField(rows, "backlogAutomated");
-  const totalAutomated = computeTotalAutomated(uiAutomated, apiAutomated, config.countingMode);
-  const remaining = Math.max(0, num(mod.totalTestCases) - totalAutomated);
-  const coverage = pct(totalAutomated, mod.totalTestCases);
+  const testCasesExecuted = sumField(rows, "testCasesExecuted");
+  const resolved = resolveAutomationTotals({
+    uiAutomated,
+    apiAutomated,
+    inSprintAutomated,
+    backlogAutomated,
+    manualWritten,
+    testCasesExecuted,
+    baselineTotalTestCases: mod.totalTestCases,
+    countingMode: config.countingMode,
+  });
+  const loggedAutomated = rows.reduce((sum, row) => sum + entryAutomated(row), 0);
+  const totalAutomated = Math.max(num(mod.uiAutomated), num(mod.apiAutomated)) + loggedAutomated;
+  const totalTestCases = Math.max(resolved.totalTestCases, totalAutomated, num(mod.totalTestCases));
+  const coverage = pct(totalAutomated, totalTestCases);
   return {
     ...mod,
     current: {
-      totalTestCases: num(mod.totalTestCases),
+      totalTestCases,
       manualWritten,
       uiAutomated,
       apiAutomated,
@@ -152,9 +194,10 @@ export function moduleSnapshot(mod, allUpdates, config) {
       inSprintAutomated,
       backlogAutomated,
       totalAutomated,
-      remaining,
+      remaining: Math.max(0, totalTestCases - totalAutomated),
       coverage,
-      testCasesExecuted: sumField(rows, "testCasesExecuted"),
+      automationPct: `${coverage}%`,
+      testCasesExecuted,
       passed: sumField(rows, "passed"),
       failed: sumField(rows, "failed"),
       blocked: sumField(rows, "blocked"),
@@ -378,8 +421,9 @@ export function buildDashboard(db, filters = {}) {
   const projectModules = project ? db.modules.filter((m) => matchesProject(m, project)) : db.modules;
   const projectSprints = project ? db.sprints.filter((s) => matchesProject(s, project)) : db.sprints;
   const range = resolveRange(filters, projectSprints, config);
-  const scoped = filterUpdates(db.dailyUpdates, filters, null);
-  const ranged = filterUpdates(db.dailyUpdates, filters, range);
+  const teamFilters = { ...filters, userId: "" };
+  const scoped = filterUpdates(db.dailyUpdates, teamFilters, null);
+  const ranged = filterUpdates(db.dailyUpdates, teamFilters, range);
   const comparison = inSprintVsBacklog(scoped);
   const currentSprint = projectSprints.find((s) => s.id === config.currentSprintId) || projectSprints[projectSprints.length - 1];
   const sprintRows = scoped.filter((u) => u.sprintId === currentSprint?.id);
@@ -442,7 +486,14 @@ export function buildDashboard(db, filters = {}) {
         backlogAutomated: 0,
         uiAutomated: 0,
         apiAutomated: 0,
+        loggedAutomated: 0,
+        qaName: "",
       };
+    }
+    stories[key].loggedAutomated += entryAutomated(row);
+    const qaName = db.users.find((user) => user.id === row.userId)?.name;
+    if (qaName && !stories[key].qaName.split(", ").includes(qaName)) {
+      stories[key].qaName = [stories[key].qaName, qaName].filter(Boolean).join(", ");
     }
     stories[key].manualWritten += num(row.manualWritten);
     stories[key].inSprintAutomated += num(row.inSprintAutomated);
@@ -523,11 +574,28 @@ export function buildDashboard(db, filters = {}) {
     },
     risks: (db.risks || []).filter((r) => !project || matchesProject(r, project)),
     feeShare,
-    stories: Object.values(stories).map((s) => ({
-      ...s,
-      totalAutomated: s.inSprintAutomated + s.backlogAutomated,
-      remaining: s.totalTestCases ? Math.max(0, s.totalTestCases - (s.inSprintAutomated + s.backlogAutomated)) : null,
-    })),
+    stories: Object.values(stories).map((s) => {
+      const resolved = resolveAutomationTotals({
+        uiAutomated: s.uiAutomated,
+        apiAutomated: s.apiAutomated,
+        inSprintAutomated: s.inSprintAutomated,
+        backlogAutomated: s.backlogAutomated,
+        manualWritten: s.manualWritten,
+        testCasesExecuted: 0,
+        baselineTotalTestCases: s.totalTestCases,
+        countingMode: config.countingMode,
+      });
+      const totalAutomated = Math.max(resolved.totalAutomated, s.loggedAutomated || 0);
+      const totalTestCases = Math.max(resolved.totalTestCases, totalAutomated);
+      const coverage = pct(totalAutomated, totalTestCases);
+      return {
+        ...s,
+        totalTestCases,
+        totalAutomated,
+        automationPct: `${coverage}%`,
+        remaining: totalTestCases ? Math.max(0, totalTestCases - totalAutomated) : null,
+      };
+    }),
     modules: projectModules.map((m) => moduleSnapshot(m, scoped, config)),
     dailyTrend: dailyTrend(ranged, db.users),
     chartByDate: chartByDate(ranged),
@@ -535,6 +603,33 @@ export function buildDashboard(db, filters = {}) {
     team: teamProgress(ranged, db.users),
     sprints: sprintProgress(projectSprints, scoped, config),
     currentSprint,
+    entries: scoped
+      .slice()
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+      .map((row) => {
+        const resolved = resolveAutomationTotals({
+          uiAutomated: row.uiAutomated,
+          apiAutomated: row.apiAutomated,
+          inSprintAutomated: row.inSprintAutomated,
+          backlogAutomated: row.backlogAutomated,
+          manualWritten: row.manualWritten,
+          testCasesExecuted: row.testCasesExecuted,
+          baselineTotalTestCases: 0,
+          countingMode: config.countingMode,
+        });
+        return {
+          id: row.id,
+          date: row.date,
+          project: projectOf(row),
+          userId: row.userId,
+          qaName: db.users.find((user) => user.id === row.userId)?.name || "Unknown",
+          moduleName: db.modules.find((m) => m.id === row.moduleId)?.name || "Unknown",
+          userStory: row.userStory || "",
+          totalTestCases: resolved.totalTestCases,
+          totalAutomated: resolved.totalAutomated,
+          automationPct: `${resolved.coverage}%`,
+        };
+      }),
     achievements: scoped
       .filter((u) => u.comments)
       .sort((a, b) => b.date.localeCompare(a.date))

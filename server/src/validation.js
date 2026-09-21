@@ -1,5 +1,5 @@
 const { WORK_TYPES, NUMERIC_FIELDS } = require("./constants");
-const { moduleSnapshot, computeTotalAutomated, num } = require("./analytics");
+const { moduleSnapshot, resolveAutomationTotals, num } = require("./analytics");
 
 function asInt(value, fallback = 0) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -59,7 +59,16 @@ function validateAgainstBaselines(db, payload, numbers, existingId) {
   const nextUi = snapshot.current.uiAutomated + numbers.uiAutomated;
   const nextApi = snapshot.current.apiAutomated + numbers.apiAutomated;
   const nextRecorded = snapshot.current.apiRecorded + numbers.apisRecorded;
-  const nextTotal = computeTotalAutomated(nextUi, nextApi, config.countingMode);
+  const nextTotal = resolveAutomationTotals({
+    uiAutomated: nextUi,
+    apiAutomated: nextApi,
+    inSprintAutomated: snapshot.current.inSprintAutomated + numbers.inSprintAutomated,
+    backlogAutomated: snapshot.current.backlogAutomated + numbers.backlogAutomated,
+    manualWritten: snapshot.current.manualWritten + numbers.manualWritten,
+    testCasesExecuted: snapshot.current.testCasesExecuted + numbers.testCasesExecuted,
+    baselineTotalTestCases: mod.totalTestCases,
+    countingMode: config.countingMode,
+  }).totalAutomated;
 
   if (num(mod.totalTestCases) > 0 && !config.allowAutomationExceedScope && nextTotal > num(mod.totalTestCases)) {
     errors.push(

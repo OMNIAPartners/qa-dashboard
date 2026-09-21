@@ -1,5 +1,5 @@
 import type { DailyUpdate, DashboardData, Filters, User } from "../types";
-import { bimonthly, buildDashboard, computeTotalAutomated, DEFAULT_CONFIG, moduleSnapshot, weeklyStatus } from "./analytics";
+import { bimonthly, buildDashboard, DEFAULT_CONFIG, moduleSnapshot, resolveAutomationTotals, weeklyStatus } from "./analytics";
 import { createSeed, WORK_TYPES } from "./seed";
 
 const KEY = "connect-qa-offline-db-v5";
@@ -27,6 +27,10 @@ function save(db: any) {
   return db;
 }
 
+async function readDb() {
+  return load();
+}
+
 function currentUser() {
   const raw = localStorage.getItem(SESSION);
   return raw ? JSON.parse(raw) : null;
@@ -39,7 +43,10 @@ function enrich(row: any, db: any) {
     qaName: db.users.find((u: any) => u.id === row.userId)?.name,
     moduleName: db.modules.find((m: any) => m.id === row.moduleId)?.name,
     sprintName: db.sprints.find((s: any) => s.id === row.sprintId)?.sprintName,
-    dailyTotal: Number(row.inSprintAutomated || 0) + Number(row.backlogAutomated || 0),
+    dailyTotal: Math.max(
+      Number(row.inSprintAutomated || 0) + Number(row.backlogAutomated || 0),
+      Number(row.uiAutomated || 0) + Number(row.apiAutomated || 0)
+    ),
   };
 }
 
@@ -48,8 +55,8 @@ function uniqueKey(row: any) {
 }
 
 export const offline = {
-  login(email: string, password: string) {
-    const db = load();
+  async login(email: string, password: string) {
+    const db = await readDb();
     const normalized = String(email || "").trim().toLowerCase();
     const pass = String(password || "").trim();
     const candidates = normalized.includes("@") ? [normalized] : [normalized, `${normalized}@connect.qa`];
@@ -65,8 +72,8 @@ export const offline = {
     if (!user) throw { response: { status: 401 } };
     return user;
   },
-  getMeta() {
-    const db = load();
+  async getMeta() {
+    const db = await readDb();
     return {
       workTypes: WORK_TYPES,
       roles: ["qa", "lead", "admin"],
@@ -78,18 +85,18 @@ export const offline = {
       config: { ...DEFAULT_CONFIG, ...db.config },
     };
   },
-  getDashboard(filters: Filters) {
-    return buildDashboard(load(), filters) as DashboardData;
+  async getDashboard(filters: Filters) {
+    return buildDashboard(await readDb(), filters) as DashboardData;
   },
-  getWeekly(weekStart: string) {
-    return weeklyStatus(load().dailyUpdates, weekStart);
+  async getWeekly(weekStart: string) {
+    return weeklyStatus((await readDb()).dailyUpdates, weekStart);
   },
-  getBimonthly(startDate: string, endDate: string) {
-    const db = load();
+  async getBimonthly(startDate: string, endDate: string) {
+    const db = await readDb();
     return bimonthly(db.modules, db.dailyUpdates, startDate, endDate, { ...DEFAULT_CONFIG, ...db.config });
   },
-  getModuleDetail(id: string) {
-    const db = load();
+  async getModuleDetail(id: string) {
+    const db = await readDb();
     const config = { ...DEFAULT_CONFIG, ...db.config };
     const mod = db.modules.find((m: any) => m.id === id);
     const rows = db.dailyUpdates.filter((u: any) => u.moduleId === id);
@@ -121,24 +128,21 @@ export const offline = {
     });
     return { module: moduleSnapshot(mod, db.dailyUpdates, config), contributors, sprints: Object.values(sprints), trend: Object.values(trend), updates: rows };
   },
-  listUpdates() {
-    const db = load();
-    const user = currentUser();
-    let rows = db.dailyUpdates;
-    if (user?.role === "qa") rows = rows.filter((r: any) => r.userId === user.id);
-    return rows.map((row: any) => enrich(row, db));
+  async listUpdates() {
+    const db = await readDb();
+    return db.dailyUpdates
+      .slice()
+      .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+      .map((row: any) => enrich(row, db));
   },
-  lookupUpdate(params: Record<string, string>) {
-    const db = load();
-    const user = currentUser();
-    const target = user?.role === "qa" ? user.id : params.userId;
-    const found = db.dailyUpdates.find((row: any) => uniqueKey(row) === uniqueKey({ ...params, userId: target }));
+  async lookupUpdate(params: Record<string, string>) {
+    const db = await readDb();
+    const found = db.dailyUpdates.find((row: any) => uniqueKey(row) === uniqueKey(params));
     return found ? enrich(found, db) : null;
   },
-  saveUpdate(payload: Partial<DailyUpdate>, filters: Filters) {
-    const db = load();
-    const user = currentUser();
-    const next = { ...payload, project: payload.project === "Force" ? "Force" : "Connect", userId: user?.role === "qa" ? user.id : payload.userId };
+  async saveUpdate(payload: Partial<DailyUpdate>, filters: Filters) {
+    const db = await readDb();
+    const next = { ...payload, project: payload.project === "Force" ? "Force" : "Connect", userId: payload.userId };
     if (!next.date || !next.project || !next.userId || !next.moduleId || !next.sprintId || !next.workType || !String(next.userStory || "").trim()) {
       throw { response: { data: { message: "Date, project, QA name, module, sprint, user story, and work type are mandatory." } } };
     }
@@ -164,7 +168,16 @@ export const offline = {
     const mod = db.modules.find((m: any) => m.id === next.moduleId);
     if (!mod) throw { response: { data: { message: "Module is required. Type a module name to add it." } } };
     const snapshot = moduleSnapshot(mod, others, db.config);
-    const nextTotal = computeTotalAutomated(snapshot.current.uiAutomated + Number(next.uiAutomated || 0), snapshot.current.apiAutomated + Number(next.apiAutomated || 0), db.config.countingMode);
+    const nextTotal = resolveAutomationTotals({
+      uiAutomated: snapshot.current.uiAutomated + Number(next.uiAutomated || 0),
+      apiAutomated: snapshot.current.apiAutomated + Number(next.apiAutomated || 0),
+      inSprintAutomated: snapshot.current.inSprintAutomated + Number(next.inSprintAutomated || 0),
+      backlogAutomated: snapshot.current.backlogAutomated + Number(next.backlogAutomated || 0),
+      manualWritten: snapshot.current.manualWritten + Number(next.manualWritten || 0),
+      testCasesExecuted: snapshot.current.testCasesExecuted + Number(next.testCasesExecuted || 0),
+      baselineTotalTestCases: mod.totalTestCases,
+      countingMode: db.config.countingMode,
+    }).totalAutomated;
     if (Number(mod.totalTestCases) > 0 && !db.config.allowAutomationExceedScope && nextTotal > Number(mod.totalTestCases)) {
       throw { response: { data: { message: `Automated test cases cannot exceed Total TC (${mod.totalTestCases}) for ${mod.name}.` } } };
     }
@@ -185,8 +198,8 @@ export const offline = {
     save(db);
     return { update: enrich(saved, db), dashboard: buildDashboard(db, filters), replaced: Boolean(existing) };
   },
-  saveUser(payload: Partial<User> & { password?: string }, id?: string) {
-    const db = load();
+  async saveUser(payload: Partial<User> & { password?: string }, id?: string) {
+    const db = await readDb();
     if (!id) {
       const created = {
         id: `user-${Date.now()}`,
@@ -204,17 +217,15 @@ export const offline = {
     save(db);
     return publicUser(db.users.find((u: any) => u.id === id));
   },
-  resolveQaName(name: string) {
-    const db = load();
+  async resolveQaName(name: string) {
+    const db = await readDb();
     const trimmed = name.trim();
     const existing = db.users.find((u: any) => u.active && u.name.toLowerCase() === trimmed.toLowerCase());
     if (existing) return publicUser(existing);
-    const user = currentUser();
-    if (user?.role === "qa") return this.saveUser({ name: trimmed }, user.id);
     return this.saveUser({ name: trimmed, role: "qa" });
   },
-  resolveModule(name: string, project?: string) {
-    const db = load();
+  async resolveModule(name: string, project?: string) {
+    const db = await readDb();
     const proj = project === "Force" ? "Force" : "Connect";
     const existing = db.modules.find((m: any) => m.name.toLowerCase() === name.trim().toLowerCase() && (m.project || "Connect") === proj);
     if (existing) return existing;
@@ -228,8 +239,8 @@ export const offline = {
       apiAutomated: 0,
     });
   },
-  resolveSprint(sprintName: string, project?: string) {
-    const db = load();
+  async resolveSprint(sprintName: string, project?: string) {
+    const db = await readDb();
     const proj = project === "Force" ? "Force" : "Connect";
     const existing = db.sprints.find((s: any) => s.sprintName.toLowerCase() === sprintName.trim().toLowerCase() && (s.project || "Connect") === proj);
     if (existing) return existing;
@@ -244,11 +255,11 @@ export const offline = {
     if (!db.config.currentSprintId) this.saveConfig({ currentSprintId: created.id });
     return created;
   },
-  listUsers() {
-    return load().users.map(publicUser);
+  async listUsers() {
+    return (await readDb()).users.map(publicUser);
   },
-  saveModule(payload: Record<string, unknown>, id?: string) {
-    const db = load();
+  async saveModule(payload: Record<string, unknown>, id?: string) {
+    const db = await readDb();
     if (!id) {
       const created = { id: `mod-${Date.now()}`, baselineLocked: false, ...payload };
       db.modules.push(created);
@@ -259,14 +270,14 @@ export const offline = {
     save(db);
     return db.modules.find((m: any) => m.id === id);
   },
-  deleteModule(id: string) {
-    const db = load();
+  async deleteModule(id: string) {
+    const db = await readDb();
     db.modules = (db.modules || []).filter((mod: any) => mod.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.moduleId !== id);
     save(db);
   },
-  saveSprint(payload: Record<string, unknown>, id?: string) {
-    const db = load();
+  async saveSprint(payload: Record<string, unknown>, id?: string) {
+    const db = await readDb();
     const executionKeys = ["inSprintAutoExecuted", "inSprintAutoPassed", "inSprintAutoFailed", "inSprintAutoBlocked", "inSprintExecutionNotes"];
     const hasExecution = executionKeys.some((key) => payload[key] != null);
     const execution: Record<string, unknown> = {
@@ -294,21 +305,21 @@ export const offline = {
     save(db);
     return db.sprints.find((s: any) => s.id === id);
   },
-  deleteSprint(id: string) {
-    const db = load();
+  async deleteSprint(id: string) {
+    const db = await readDb();
     db.sprints = (db.sprints || []).filter((sprint: any) => sprint.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.sprintId !== id);
     if (db.config?.currentSprintId === id) db.config.currentSprintId = "";
     save(db);
   },
-  saveConfig(payload: Record<string, unknown>) {
-    const db = load();
+  async saveConfig(payload: Record<string, unknown>) {
+    const db = await readDb();
     db.config = { ...DEFAULT_CONFIG, ...db.config, ...payload };
     save(db);
     return db.config;
   },
-  downloadExcel(filters: Filters) {
-    const dash = buildDashboard(load(), filters);
+  async downloadExcel(filters: Filters) {
+    const dash = buildDashboard(await readDb(), filters);
     const rows = [["Metric", "Value"], ...Object.entries(dash.kpis), [], ["Module", "Total TC", "UI", "API", "Coverage"], ...dash.modules.map((m: any) => [m.name, m.current.totalTestCases, m.current.uiAutomated, m.current.apiAutomated, m.current.coverage])];
     const csv = rows.map((r) => r.join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -318,11 +329,11 @@ export const offline = {
     link.click();
     URL.revokeObjectURL(url);
   },
-  listRisks() {
-    return load().risks || [];
+  async listRisks() {
+    return (await readDb()).risks || [];
   },
-  saveRisk(payload: Record<string, unknown>, id?: string) {
-    const db = load();
+  async saveRisk(payload: Record<string, unknown>, id?: string) {
+    const db = await readDb();
     if (!db.risks) db.risks = [];
     if (!id) {
       const created = {
@@ -342,8 +353,8 @@ export const offline = {
     save(db);
     return db.risks.find((r: any) => r.id === id);
   },
-  deleteRisk(id: string) {
-    const db = load();
+  async deleteRisk(id: string) {
+    const db = await readDb();
     db.risks = (db.risks || []).filter((r: any) => r.id !== id);
     save(db);
   },

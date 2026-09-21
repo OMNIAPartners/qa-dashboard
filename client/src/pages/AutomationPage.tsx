@@ -87,11 +87,11 @@ export function AutomationPage() {
             rows={dashboard.modules}
             columns={[
               { field: "name", headerName: "Module", flex: 1, minWidth: 180 },
-              { field: "total", headerName: "Total TC", width: 110, valueGetter: (_, r) => r.current?.totalTestCases ?? 0 },
-              { field: "auto", headerName: "Automated", width: 120, valueGetter: (_, r) => r.current?.totalAutomated ?? 0 },
-              { field: "sprint", headerName: "Sprint", width: 110, valueGetter: (_, r) => r.current?.inSprintAutomated ?? 0 },
-              { field: "backlog", headerName: "Backlog", width: 110, valueGetter: (_, r) => r.current?.backlogAutomated ?? 0 },
-              { field: "pct", headerName: "Automation %", width: 130, valueGetter: (_, r) => pctOrNA(r.current?.totalAutomated, r.current?.totalTestCases) },
+              { field: "totalTestCases", headerName: "Total TC", width: 110, valueGetter: (_v, row) => row.current?.totalTestCases ?? 0 },
+              { field: "auto", headerName: "Automated", width: 120, valueGetter: (_v, row) => row.current?.totalAutomated ?? 0 },
+              { field: "sprint", headerName: "Sprint", width: 110, valueGetter: (_v, row) => row.current?.inSprintAutomated ?? 0 },
+              { field: "backlog", headerName: "Backlog", width: 110, valueGetter: (_v, row) => row.current?.backlogAutomated ?? 0 },
+              { field: "automationPct", headerName: "Automation %", width: 140, valueGetter: (_v, row) => row.current?.automationPct || "0%" },
               { field: "remain", headerName: "Remaining", width: 110, valueGetter: (_, r) => r.current?.remaining ?? 0 },
             ]}
           />

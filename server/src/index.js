@@ -159,7 +159,6 @@ app.get("/api/modules/:id/detail", auth(), (req, res) => {
 app.get("/api/daily-updates", auth(), (req, res) => {
   const db = getDb();
   let rows = db.dailyUpdates;
-  if (req.user.role === "qa") rows = rows.filter((r) => r.userId === req.user.id);
   if (req.query.userId) rows = rows.filter((r) => r.userId === req.query.userId);
   if (req.query.moduleId) rows = rows.filter((r) => r.moduleId === req.query.moduleId);
   if (req.query.date) rows = rows.filter((r) => r.date === req.query.date);
@@ -173,9 +172,8 @@ app.get("/api/daily-updates", auth(), (req, res) => {
 
 app.get("/api/daily-updates/lookup", auth(), (req, res) => {
   const { date, userId, moduleId, userStory, project } = req.query;
-  const targetUser = req.user.role === "qa" ? req.user.id : userId;
   const match = getDb().dailyUpdates.find(
-    (row) => uniqueKey(row) === uniqueKey({ date, userId: targetUser, moduleId, userStory, project: project || "Connect" })
+    (row) => uniqueKey(row) === uniqueKey({ date, userId, moduleId, userStory, project: project || "Connect" })
   );
   res.json({ existing: match ? enrichUpdate(match, getDb()) : null });
 });
@@ -183,7 +181,6 @@ app.get("/api/daily-updates/lookup", auth(), (req, res) => {
 app.post("/api/daily-updates", auth(), (req, res) => {
   const db = getDb();
   const payload = { ...req.body };
-  if (req.user.role === "qa") payload.userId = req.user.id;
   const { errors, numbers } = validateDailyPayload(payload);
   if (errors.length) return res.status(400).json({ message: errors[0], errors });
 
@@ -196,9 +193,6 @@ app.post("/api/daily-updates", auth(), (req, res) => {
   let saved;
   saveDb((state) => {
     if (existing) {
-      if (req.user.role === "qa" && existing.userId !== req.user.id) {
-        return state;
-      }
       saved = {
         ...existing,
         ...payload,
@@ -241,7 +235,7 @@ app.post("/api/daily-updates", auth(), (req, res) => {
     return state;
   });
 
-  if (!saved) return res.status(403).json({ message: "You can only edit your own updates." });
+  if (!saved) return res.status(400).json({ message: "Unable to save this update." });
   res.json({
     update: enrichUpdate(saved, getDb()),
     dashboard: buildDashboard(getDb(), req.query),
@@ -291,19 +285,6 @@ app.post("/api/users/resolve", auth(), (req, res) => {
   const db = getDb();
   const existing = db.users.find((u) => u.active && u.name.toLowerCase() === name.toLowerCase());
   if (existing) return res.json(publicUser(existing));
-
-  if (req.user.role === "qa") {
-    let updated;
-    saveDb((state) => {
-      state.users = state.users.map((user) => {
-        if (user.id !== req.user.id) return user;
-        updated = { ...user, name };
-        return updated;
-      });
-      return state;
-    });
-    return res.json(publicUser(updated));
-  }
 
   const created = createQaUser(name);
   saveDb((state) => {
@@ -705,7 +686,10 @@ function enrichUpdate(row, db) {
     qaName: db.users.find((u) => u.id === row.userId)?.name,
     moduleName: db.modules.find((m) => m.id === row.moduleId)?.name,
     sprintName: db.sprints.find((s) => s.id === row.sprintId)?.sprintName,
-    dailyTotal: Number(row.inSprintAutomated || 0) + Number(row.backlogAutomated || 0),
+    dailyTotal: Math.max(
+      Number(row.inSprintAutomated || 0) + Number(row.backlogAutomated || 0),
+      Number(row.uiAutomated || 0) + Number(row.apiAutomated || 0)
+    ),
   };
 }
 

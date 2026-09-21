@@ -38,10 +38,10 @@ export function ProjectDashboardPage({ project }: { project: ProjectName }) {
 
   const moduleColumns: GridColDef[] = [
     { field: "name", headerName: isForce ? "Module" : "Module / User Story", flex: 1.4, minWidth: 180 },
-    { field: "total", headerName: "Total TC", width: 100, valueGetter: (_, r) => r.current.totalTestCases },
-    { field: "manual", headerName: "Manual", width: 100, valueGetter: (_, r) => r.current.manualWritten },
-    { field: "auto", headerName: "Automated", width: 110, valueGetter: (_, r) => r.current.totalAutomated },
-    { field: "pct", headerName: "Automation %", width: 130, valueGetter: (_, r) => pctOrNA(r.current.totalAutomated, r.current.totalTestCases) },
+    { field: "totalTestCases", headerName: "Total TC", width: 110, valueGetter: (_v, row) => row.current?.totalTestCases ?? 0 },
+    { field: "manual", headerName: "Manual", width: 100, valueGetter: (_v, row) => row.current?.manualWritten ?? 0 },
+    { field: "auto", headerName: "Automated", width: 110, valueGetter: (_v, row) => row.current?.totalAutomated ?? 0 },
+    { field: "automationPct", headerName: "Automation %", width: 140, valueGetter: (_v, row) => row.current?.automationPct || pctOrNA(row.current?.totalAutomated, row.current?.totalTestCases) },
     ...(!isForce ? [{ field: "progress", headerName: "In Progress", width: 120, valueGetter: () => "N/A" } as GridColDef] : []),
     { field: "remaining", headerName: "Remaining", width: 110, valueGetter: (_, r) => r.current.remaining },
   ];
@@ -49,10 +49,11 @@ export function ProjectDashboardPage({ project }: { project: ProjectName }) {
   const storyColumns: GridColDef[] = [
     { field: "moduleName", headerName: "Module", flex: 1, minWidth: 140 },
     { field: "userStory", headerName: "User Story", flex: 1, minWidth: 140 },
-    { field: "totalTestCases", headerName: "Total TC", width: 100 },
+    { field: "qaName", headerName: "QA", width: 140 },
+    { field: "totalTestCases", headerName: "Total TC", width: 110 },
     { field: "manualWritten", headerName: "Manual", width: 100 },
     { field: "totalAutomated", headerName: "Automated", width: 110 },
-    { field: "pct", headerName: "Automation %", width: 130, valueGetter: (_, r) => pctOrNA(r.totalAutomated, r.totalTestCases) },
+    { field: "automationPct", headerName: "Automation %", width: 140 },
     { field: "progress", headerName: "In Progress", width: 120, valueGetter: () => "N/A" },
     { field: "remaining", headerName: "Remaining", width: 110, valueGetter: (_, r) => (r.remaining == null ? "N/A" : r.remaining) },
   ];
@@ -178,6 +179,28 @@ export function ProjectDashboardPage({ project }: { project: ProjectName }) {
           <DataGrid
             rows={dashboard.modules.filter((m) => !storyQuery || m.name.toLowerCase().includes(storyQuery.toLowerCase()))}
             columns={moduleColumns}
+            disableRowSelectionOnClick
+          />
+        </Box>
+      </Card>
+
+      <Card sx={{ p: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1 }}>Entries from every QA</Typography>
+        <Typography color="text.secondary" sx={{ mb: 1 }}>
+          {dashboard.entries?.length || 0} entries. Totals include updates saved by every person.
+        </Typography>
+        <Box sx={{ height: 360 }}>
+          <DataGrid
+            rows={dashboard.entries || []}
+            columns={[
+              { field: "date", headerName: "Date", width: 120 },
+              { field: "qaName", headerName: "QA", width: 160 },
+              { field: "moduleName", headerName: "Module", flex: 1, minWidth: 160 },
+              { field: "userStory", headerName: "User Story", width: 140 },
+              { field: "totalTestCases", headerName: "Total TC", width: 110 },
+              { field: "totalAutomated", headerName: "Automated", width: 120 },
+              { field: "automationPct", headerName: "Automation %", width: 140 },
+            ]}
             disableRowSelectionOnClick
           />
         </Box>

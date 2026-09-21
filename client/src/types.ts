@@ -39,6 +39,7 @@ export interface ModuleCurrent {
   totalAutomated: number;
   remaining: number;
   coverage: number;
+  automationPct?: string;
   testCasesExecuted?: number;
   passed?: number;
   failed?: number;
@@ -175,7 +176,20 @@ export interface DashboardData {
     uiAutomated: number;
     apiAutomated: number;
     totalAutomated: number;
+    automationPct?: string;
     remaining: number | null;
+  }>;
+  entries?: Array<{
+    id: string;
+    date: string;
+    project: string;
+    userId: string;
+    qaName: string;
+    moduleName: string;
+    userStory: string;
+    totalTestCases: number;
+    totalAutomated: number;
+    automationPct: string;
   }>;
   modules: Module[];
   dailyTrend: Array<{

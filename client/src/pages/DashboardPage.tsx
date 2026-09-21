@@ -1,4 +1,5 @@
 import { Box, Button, Card, LinearProgress, Stack, Typography } from "@mui/material";
+import { DataGrid } from "@mui/x-data-grid";
 import { useNavigate } from "react-router-dom";
 import {
   Bar,
@@ -77,6 +78,28 @@ export function DashboardPage() {
 
       <Typography variant="h5">{combined ? "Executive Dashboard — Combined" : `Executive Dashboard — ${filters.project}`}</Typography>
       <ProjectHealthCards dash={dashboard} combined={combined} />
+      <Card sx={{ p: 2 }}>
+        <Typography variant="h6">Entries from every QA</Typography>
+        <Typography color="text.secondary" sx={{ mb: 1 }}>
+          {dashboard.entries?.length || 0} entries are included in the totals. Everyone can see updates saved by the rest of the team.
+        </Typography>
+        <Box sx={{ height: 360 }}>
+          <DataGrid
+            rows={dashboard.entries || []}
+            columns={[
+              { field: "date", headerName: "Date", width: 120 },
+              { field: "project", headerName: "Project", width: 110 },
+              { field: "qaName", headerName: "QA", width: 160 },
+              { field: "moduleName", headerName: "Module", flex: 1, minWidth: 160 },
+              { field: "userStory", headerName: "User Story", width: 140 },
+              { field: "totalTestCases", headerName: "Total TC", width: 110 },
+              { field: "totalAutomated", headerName: "Automated", width: 120 },
+              { field: "automationPct", headerName: "Automation %", width: 140 },
+            ]}
+            disableRowSelectionOnClick
+          />
+        </Box>
+      </Card>
       <HighlightsPanel dash={dashboard} project={filters.project} />
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr" }, gap: 2 }}>
