@@ -4,7 +4,86 @@ import { useEffect, useState } from "react";
 import { listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
 import { useApp } from "../appState";
 import { useAuth } from "../auth";
-import type { User } from "../types";
+import type { Module, User } from "../types";
+
+type NumberOrBlank = number | "";
+
+function digitsOnly(raw: string) {
+  return raw.replace(/[^\d]/g, "");
+}
+
+function toCount(value: NumberOrBlank) {
+  return value === "" ? 0 : Number(value) || 0;
+}
+
+function NumericBox({
+  label,
+  value,
+  onChange,
+  size = "medium",
+}: {
+  label?: string;
+  value: NumberOrBlank;
+  onChange: (value: NumberOrBlank) => void;
+  size?: "small" | "medium";
+}) {
+  return (
+    <TextField
+      fullWidth
+      size={size}
+      label={label}
+      value={value === "" ? "" : String(value)}
+      inputMode="numeric"
+      onFocus={(event) => event.target.select()}
+      onChange={(event) => {
+        const raw = digitsOnly(event.target.value);
+        onChange(raw === "" ? "" : Number(raw));
+      }}
+    />
+  );
+}
+
+function GridNumericBox({
+  row,
+  field,
+  onSave,
+}: {
+  row: Module;
+  field: keyof Pick<Module, "totalTestCases" | "manualWritten" | "uiAutomated" | "apiRecorded" | "apiAutomated">;
+  onSave: (next: Module) => void;
+}) {
+  const current = Number(row[field] || 0);
+  const [draft, setDraft] = useState(String(current));
+
+  useEffect(() => {
+    setDraft(String(Number(row[field] || 0)));
+  }, [row.id, row[field], field]);
+
+  function commit() {
+    const nextValue = draft === "" ? 0 : Number(draft) || 0;
+    if (nextValue === current) return;
+    onSave({ ...row, [field]: nextValue });
+  }
+
+  return (
+    <TextField
+      size="small"
+      fullWidth
+      value={draft}
+      inputMode="numeric"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onFocus={(event) => event.target.select()}
+      onChange={(event) => setDraft(digitsOnly(event.target.value))}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
+      sx={{ "& .MuiInputBase-input": { py: 0.75, textAlign: "right" } }}
+    />
+  );
+}
 
 export function AdminPage() {
   const { user } = useAuth();
@@ -13,7 +92,15 @@ export function AdminPage() {
   const [error, setError] = useState("");
   const [allUsers, setAllUsers] = useState<User[]>(users);
   const [userForm, setUserForm] = useState({ name: "", email: "", role: "qa", password: "Connect@123" });
-  const [moduleForm, setModuleForm] = useState({ name: "", project: "Connect", totalTestCases: 0, manualWritten: 0, uiAutomated: 0, apiRecorded: 0, apiAutomated: 0 });
+  const [moduleForm, setModuleForm] = useState<{
+    name: string;
+    project: string;
+    totalTestCases: NumberOrBlank;
+    manualWritten: NumberOrBlank;
+    uiAutomated: NumberOrBlank;
+    apiRecorded: NumberOrBlank;
+    apiAutomated: NumberOrBlank;
+  }>({ name: "", project: "Connect", totalTestCases: "", manualWritten: "", uiAutomated: "", apiRecorded: "", apiAutomated: "" });
   const [sprintForm, setSprintForm] = useState({ sprintName: "", project: "Connect", startDate: "", endDate: "", plannedTestCases: 0 });
   const [cfg, setCfg] = useState(config);
 
@@ -35,6 +122,21 @@ export function AdminPage() {
     } catch (err: any) {
       setError(err?.response?.data?.message || "Unable to save.");
     }
+  }
+
+  function saveBaseline(next: Module) {
+    void run(
+      () =>
+        saveModule(
+          {
+            ...next,
+            isFeeShare: /feeshare/i.test(String(next.name || "")),
+            baselineChange: true,
+          },
+          next.id
+        ),
+      "Module updated."
+    );
   }
 
   return (
@@ -91,7 +193,7 @@ export function AdminPage() {
       <Card sx={{ p: 3 }}>
         <Typography variant="h6">Modules / Baseline</Typography>
         <Typography color="text.secondary" sx={{ mb: 2 }}>
-          Daily updates never overwrite these baseline numbers. Only administrators should change locked Connect scope.
+          Click any number box and type. Daily updates never overwrite these baseline numbers. Only administrators should change locked Connect scope.
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={3}><TextField fullWidth label="Module Name" value={moduleForm.name} onChange={(e) => setModuleForm({ ...moduleForm, name: e.target.value })} /></Grid>
@@ -101,29 +203,96 @@ export function AdminPage() {
               <MenuItem value="Force">Force</MenuItem>
             </TextField>
           </Grid>
-          <Grid item xs={6} md={2}><TextField fullWidth type="number" label="Total TC" value={moduleForm.totalTestCases} onChange={(e) => setModuleForm({ ...moduleForm, totalTestCases: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><TextField fullWidth type="number" label="Manual" value={moduleForm.manualWritten} onChange={(e) => setModuleForm({ ...moduleForm, manualWritten: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><TextField fullWidth type="number" label="UI Automated" value={moduleForm.uiAutomated} onChange={(e) => setModuleForm({ ...moduleForm, uiAutomated: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><TextField fullWidth type="number" label="API Rec." value={moduleForm.apiRecorded} onChange={(e) => setModuleForm({ ...moduleForm, apiRecorded: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><Button variant="contained" onClick={() => run(() => saveModule({ ...moduleForm, isFeeShare: /feeshare/i.test(moduleForm.name) }), "Module added.")}>Add Module</Button></Grid>
+          <Grid item xs={6} md={2}><NumericBox label="Total TC" value={moduleForm.totalTestCases} onChange={(totalTestCases) => setModuleForm({ ...moduleForm, totalTestCases })} /></Grid>
+          <Grid item xs={6} md={2}><NumericBox label="Manual" value={moduleForm.manualWritten} onChange={(manualWritten) => setModuleForm({ ...moduleForm, manualWritten })} /></Grid>
+          <Grid item xs={6} md={2}><NumericBox label="UI Automated" value={moduleForm.uiAutomated} onChange={(uiAutomated) => setModuleForm({ ...moduleForm, uiAutomated })} /></Grid>
+          <Grid item xs={6} md={2}><NumericBox label="API Rec." value={moduleForm.apiRecorded} onChange={(apiRecorded) => setModuleForm({ ...moduleForm, apiRecorded })} /></Grid>
+          <Grid item xs={6} md={2}><NumericBox label="API Auto" value={moduleForm.apiAutomated} onChange={(apiAutomated) => setModuleForm({ ...moduleForm, apiAutomated })} /></Grid>
+          <Grid item xs={6} md={2}>
+            <Button
+              variant="contained"
+              fullWidth
+              sx={{ height: "56px" }}
+              onClick={() => run(async () => {
+                const payload = {
+                  name: moduleForm.name.trim(),
+                  project: moduleForm.project,
+                  totalTestCases: toCount(moduleForm.totalTestCases),
+                  manualWritten: toCount(moduleForm.manualWritten),
+                  uiAutomated: toCount(moduleForm.uiAutomated),
+                  apiRecorded: toCount(moduleForm.apiRecorded),
+                  apiAutomated: toCount(moduleForm.apiAutomated),
+                  isFeeShare: /feeshare/i.test(moduleForm.name),
+                };
+                const existing = modules.find(
+                  (mod) =>
+                    mod.name.trim().toLowerCase() === payload.name.toLowerCase() &&
+                    (mod.project || "Connect") === payload.project
+                );
+                await saveModule(existing ? { ...payload, baselineChange: true } : payload, existing?.id);
+                setModuleForm({ name: "", project: moduleForm.project, totalTestCases: "", manualWritten: "", uiAutomated: "", apiRecorded: "", apiAutomated: "" });
+              }, "Module saved.")}
+            >
+              Add Module
+            </Button>
+          </Grid>
         </Grid>
         <div style={{ height: 380, marginTop: 16 }}>
           <DataGrid
             rows={modules}
+            disableRowSelectionOnClick
+            rowHeight={56}
+            sx={{ "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" } }}
             columns={[
               { field: "name", headerName: "Module Name", flex: 1, minWidth: 180, editable: true },
               { field: "project", headerName: "Project", width: 110, editable: true },
-              { field: "totalTestCases", headerName: "Total TC", width: 110, editable: true },
-              { field: "manualWritten", headerName: "Manual", width: 110, editable: true },
-              { field: "uiAutomated", headerName: "UI Baseline", width: 120, editable: true },
-              { field: "apiRecorded", headerName: "API Rec.", width: 110, editable: true },
-              { field: "apiAutomated", headerName: "API Auto", width: 110, editable: true },
+              {
+                field: "totalTestCases",
+                headerName: "Total TC",
+                width: 130,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="totalTestCases" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
+              {
+                field: "manualWritten",
+                headerName: "Manual",
+                width: 130,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="manualWritten" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
+              {
+                field: "uiAutomated",
+                headerName: "UI Automated",
+                width: 140,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="uiAutomated" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
+              {
+                field: "apiRecorded",
+                headerName: "API Rec.",
+                width: 130,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="apiRecorded" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
+              {
+                field: "apiAutomated",
+                headerName: "API Auto",
+                width: 130,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="apiAutomated" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
             ]}
             processRowUpdate={async (next) => {
               await saveModule({ ...next, isFeeShare: /feeshare/i.test(String(next.name || "")), baselineChange: true }, next.id);
               await refresh();
               return next;
             }}
+            onProcessRowUpdateError={(err) => setError(err?.message || "Unable to update module.")}
           />
         </div>
       </Card>
