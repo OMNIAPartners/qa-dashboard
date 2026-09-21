@@ -1,7 +1,7 @@
 import { Alert, Button, Card, FormControlLabel, Grid, MenuItem, Stack, Switch, TextField, Typography } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import { useEffect, useState } from "react";
-import { deleteModule, listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
+import { deleteModule, deleteSprint, listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
 import { useApp } from "../appState";
 import { useAuth } from "../auth";
 import type { Module, User } from "../types";
@@ -101,7 +101,13 @@ export function AdminPage() {
     apiRecorded: NumberOrBlank;
     apiAutomated: NumberOrBlank;
   }>({ name: "", project: "Connect", totalTestCases: "", manualWritten: "", uiAutomated: "", apiRecorded: "", apiAutomated: "" });
-  const [sprintForm, setSprintForm] = useState({ sprintName: "", project: "Connect", startDate: "", endDate: "", plannedTestCases: 0 });
+  const [sprintForm, setSprintForm] = useState<{
+    sprintName: string;
+    project: string;
+    startDate: string;
+    endDate: string;
+    plannedTestCases: NumberOrBlank;
+  }>({ sprintName: "", project: "Connect", startDate: "", endDate: "", plannedTestCases: "" });
   const [cfg, setCfg] = useState(config);
 
   useEffect(() => {
@@ -334,22 +340,64 @@ export function AdminPage() {
           </Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="date" label="Start" InputLabelProps={{ shrink: true }} value={sprintForm.startDate} onChange={(e) => setSprintForm({ ...sprintForm, startDate: e.target.value })} /></Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="date" label="End" InputLabelProps={{ shrink: true }} value={sprintForm.endDate} onChange={(e) => setSprintForm({ ...sprintForm, endDate: e.target.value })} /></Grid>
-          <Grid item xs={6} md={2}><TextField fullWidth type="number" label="Planned TC" value={sprintForm.plannedTestCases} onChange={(e) => setSprintForm({ ...sprintForm, plannedTestCases: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><Button variant="contained" onClick={() => run(() => saveSprint(sprintForm), "Sprint added.")}>Add Sprint</Button></Grid>
+          <Grid item xs={6} md={2}>
+            <NumericBox label="Total TC" value={sprintForm.plannedTestCases} onChange={(plannedTestCases) => setSprintForm({ ...sprintForm, plannedTestCases })} />
+          </Grid>
+          <Grid item xs={6} md={2}>
+            <Button
+              variant="contained"
+              fullWidth
+              sx={{ height: "56px" }}
+              onClick={() => run(async () => {
+                await saveSprint({
+                  ...sprintForm,
+                  plannedTestCases: toCount(sprintForm.plannedTestCases),
+                });
+                setSprintForm({ sprintName: "", project: sprintForm.project, startDate: "", endDate: "", plannedTestCases: "" });
+              }, "Sprint added.")}
+            >
+              Add Sprint
+            </Button>
+          </Grid>
         </Grid>
         <div style={{ height: 320, marginTop: 16 }}>
           <DataGrid
             rows={sprints}
+            disableRowSelectionOnClick
+            disableVirtualization
+            rowHeight={56}
+            sx={{ "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" } }}
             columns={[
-              { field: "sprintName", headerName: "Sprint", flex: 1, minWidth: 140 },
+              { field: "sprintName", headerName: "Sprint", flex: 1, minWidth: 140, editable: true },
               { field: "project", headerName: "Project", width: 110, editable: true },
-              { field: "startDate", headerName: "Start", width: 120 },
-              { field: "endDate", headerName: "End", width: 120 },
-              { field: "plannedTestCases", headerName: "Planned TC", width: 120 },
+              { field: "startDate", headerName: "Start", width: 120, editable: true },
+              { field: "endDate", headerName: "End", width: 120, editable: true },
+              { field: "plannedTestCases", headerName: "Total TC", width: 120, type: "number", editable: true },
               { field: "inSprintAutoExecuted", headerName: "Auto Executed", width: 130, type: "number", editable: true },
               { field: "inSprintAutoPassed", headerName: "Passed", width: 100, type: "number", editable: true },
               { field: "inSprintAutoFailed", headerName: "Failed", width: 100, type: "number", editable: true },
               { field: "inSprintAutoBlocked", headerName: "Blocked", width: 100, type: "number", editable: true },
+              {
+                field: "actions",
+                headerName: "Delete",
+                width: 110,
+                sortable: false,
+                filterable: false,
+                disableColumnMenu: true,
+                renderCell: (params) => (
+                  <Button
+                    color="error"
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!window.confirm(`Delete sprint ${params.row.sprintName}?`)) return;
+                      void run(() => deleteSprint(params.row.id), `${params.row.sprintName} deleted.`);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                ),
+              },
             ]}
             processRowUpdate={async (next) => {
               await saveSprint(
@@ -358,7 +406,7 @@ export function AdminPage() {
                   project: next.project === "Force" ? "Force" : "Connect",
                   startDate: next.startDate,
                   endDate: next.endDate,
-                  plannedTestCases: next.plannedTestCases,
+                  plannedTestCases: Number(next.plannedTestCases || 0),
                   inSprintAutoExecuted: Number(next.inSprintAutoExecuted || 0),
                   inSprintAutoPassed: Number(next.inSprintAutoPassed || 0),
                   inSprintAutoFailed: Number(next.inSprintAutoFailed || 0),
@@ -370,6 +418,7 @@ export function AdminPage() {
               await refresh();
               return next;
             }}
+            onProcessRowUpdateError={(err) => setError(err?.message || "Unable to update sprint.")}
           />
         </div>
       </Card>

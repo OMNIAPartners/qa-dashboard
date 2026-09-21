@@ -47,7 +47,7 @@ export function SprintProgressPage() {
 
   const columns: GridColDef[] = [
     { field: "sprintName", headerName: "Sprint", flex: 1, minWidth: 140 },
-    { field: "plannedTestCases", headerName: "Planned TC", width: 120 },
+    { field: "plannedTestCases", headerName: "Total TC", width: 120 },
     { field: "inSprintAutomated", headerName: "In-Sprint Automated", width: 170 },
     { field: "inSprintAutoExecuted", headerName: "Auto Executed", width: 130 },
     { field: "inSprintAutoPassed", headerName: "Passed", width: 100 },
@@ -114,7 +114,7 @@ export function SprintProgressPage() {
       )}
       {sprint && (
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", md: "repeat(6, minmax(0, 1fr))" }, gap: 2 }}>
-          <KpiCard color="slate" label="PLANNED" value={sprint.plannedTestCases} />
+          <KpiCard color="slate" label="TOTAL TC" value={sprint.plannedTestCases} />
           <KpiCard color="green" label="COMPLETED" value={sprint.totalAutomated || 0} />
           <KpiCard color="orange" label="AUTOMATION %" value={`${sprint.completion || 0}%`} />
           <KpiCard color="purple" label="MANUAL DESIGN %" value={`${sprint.manualPct || 0}%`} />

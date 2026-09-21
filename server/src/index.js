@@ -556,6 +556,18 @@ app.put("/api/sprints/:id", auth(), (req, res) => {
   res.json(updated);
 });
 
+app.delete("/api/sprints/:id", auth(["lead", "admin"]), (req, res) => {
+  const current = getDb().sprints.find((s) => s.id === req.params.id);
+  if (!current) return res.status(404).json({ message: "Sprint not found." });
+  saveDb((state) => {
+    state.sprints = state.sprints.filter((sprint) => sprint.id !== req.params.id);
+    state.dailyUpdates = state.dailyUpdates.filter((row) => row.sprintId !== req.params.id);
+    if (state.config?.currentSprintId === req.params.id) state.config.currentSprintId = "";
+    return state;
+  });
+  res.json({ ok: true });
+});
+
 app.get("/api/config", auth(), (req, res) => {
   res.json({ ...DEFAULT_CONFIG, ...getDb().config });
 });

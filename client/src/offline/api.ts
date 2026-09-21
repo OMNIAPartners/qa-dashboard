@@ -293,6 +293,13 @@ export const offline = {
     save(db);
     return db.sprints.find((s: any) => s.id === id);
   },
+  deleteSprint(id: string) {
+    const db = load();
+    db.sprints = (db.sprints || []).filter((sprint: any) => sprint.id !== id);
+    db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.sprintId !== id);
+    if (db.config?.currentSprintId === id) db.config.currentSprintId = "";
+    save(db);
+  },
   saveConfig(payload: Record<string, unknown>) {
     const db = load();
     db.config = { ...DEFAULT_CONFIG, ...db.config, ...payload };

@@ -135,6 +135,11 @@ export async function saveSprint(payload: Record<string, unknown>, id?: string) 
   return data;
 }
 
+export async function deleteSprint(id: string) {
+  if (isOfflineMode()) return offline.deleteSprint(id);
+  await api.delete(`/sprints/${id}`);
+}
+
 export async function saveConfig(payload: Record<string, unknown>) {
   if (isOfflineMode()) return offline.saveConfig(payload);
   const { data } = await api.put("/config", payload);
