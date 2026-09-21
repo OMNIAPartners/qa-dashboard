@@ -241,6 +241,7 @@ export function AdminPage() {
           <DataGrid
             rows={modules}
             disableRowSelectionOnClick
+            disableVirtualization
             rowHeight={56}
             sx={{ "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" } }}
             columns={[
@@ -288,7 +289,7 @@ export function AdminPage() {
               },
               {
                 field: "actions",
-                headerName: "",
+                headerName: "Delete",
                 width: 110,
                 sortable: false,
                 filterable: false,
