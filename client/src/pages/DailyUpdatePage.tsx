@@ -21,6 +21,43 @@ import { useApp } from "../appState";
 import { useAuth } from "../auth";
 import { emptyDailyUpdate, type DailyUpdate } from "../types";
 
+function digitsOnly(raw: string) {
+  return raw.replace(/[^\d]/g, "");
+}
+
+function CountField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(value ? String(value) : "");
+
+  useEffect(() => {
+    setDraft(value ? String(value) : "");
+  }, [value]);
+
+  return (
+    <TextField
+      fullWidth
+      label={label}
+      value={draft}
+      placeholder="0"
+      inputMode="numeric"
+      autoComplete="off"
+      onFocus={(event) => event.target.select()}
+      onChange={(event) => {
+        const raw = digitsOnly(event.target.value);
+        setDraft(raw);
+        onChange(raw === "" ? 0 : Number(raw));
+      }}
+    />
+  );
+}
+
 const numberFields: Array<{ key: keyof DailyUpdate; label: string; group: string }> = [
   { key: "inSprintAutomated", label: "In-sprint test cases automated today", group: "Daily Automation" },
   { key: "backlogAutomated", label: "Backlog test cases automated today", group: "Daily Automation" },
@@ -312,13 +349,10 @@ export function DailyUpdatePage() {
               <Grid container spacing={2}>
                 {numberFields.filter((f) => f.group === group).map((field) => (
                   <Grid item xs={12} sm={6} md={3} key={field.key}>
-                    <TextField
-                      fullWidth
-                      type="number"
+                    <CountField
                       label={field.label}
-                      inputProps={{ min: 0 }}
-                      value={(form as Record<string, unknown>)[field.key as string] as number}
-                      onChange={(e) => set({ [field.key]: Number(e.target.value || 0) } as Partial<DailyUpdate>)}
+                      value={Number((form as Record<string, unknown>)[field.key as string] || 0)}
+                      onChange={(value) => set({ [field.key]: value } as Partial<DailyUpdate>)}
                     />
                   </Grid>
                 ))}
