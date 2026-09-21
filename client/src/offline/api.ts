@@ -39,16 +39,20 @@ function enqueueSync<T>(task: () => Promise<T>) {
   return run;
 }
 
-function save(db: any) {
+async function persist(db: any) {
   writeLocal(db);
-  if (isOfflineMode()) {
-    enqueueSync(async () => {
-      const merged = await syncTeamDb(load);
-      writeLocal(merged);
+  if (!isOfflineMode()) return db;
+  try {
+    const merged = await enqueueSync(async () => {
+      const next = await syncTeamDb(load, { mustSave: true });
+      writeLocal(next);
       syncedAt = Date.now();
-    }).catch(() => undefined);
+      return load();
+    });
+    return merged;
+  } catch {
+    throw { response: { data: { message: "The shared team log could not be updated, so other computers would not see this yet. Refresh and save again." } } };
   }
-  return db;
 }
 
 async function readDb() {
@@ -235,8 +239,8 @@ export const offline = {
       saved = { id: `du-${Date.now()}`, ...next, createdAt: now, updatedAt: now };
       db.dailyUpdates.push(saved);
     }
-    save(db);
-    return { update: enrich(saved, db), dashboard: buildDashboard(db, filters), replaced: Boolean(existing) };
+    const stored = await persist(db);
+    return { update: enrich(saved, stored), dashboard: buildDashboard(stored, filters), replaced: Boolean(existing) };
   },
   async saveUser(payload: Partial<User> & { password?: string }, id?: string) {
     const db = await readDb();
@@ -250,11 +254,11 @@ export const offline = {
         password: payload.password || "Connect@123",
       };
       db.users.push(created);
-      save(db);
+      await persist(db);
       return publicUser(created);
     }
     db.users = db.users.map((user: any) => (user.id === id ? { ...user, ...payload, name: String(payload.name || user.name).trim() } : user));
-    save(db);
+    await persist(db);
     return publicUser(db.users.find((u: any) => u.id === id));
   },
   async resolveQaName(name: string) {
@@ -303,11 +307,11 @@ export const offline = {
     if (!id) {
       const created = { id: `mod-${Date.now()}`, baselineLocked: false, ...payload };
       db.modules.push(created);
-      save(db);
+      await persist(db);
       return created;
     }
     db.modules = db.modules.map((mod: any) => (mod.id === id ? { ...mod, ...payload } : mod));
-    save(db);
+    await persist(db);
     return db.modules.find((m: any) => m.id === id);
   },
   async deleteModule(id: string) {
@@ -320,7 +324,7 @@ export const offline = {
     );
     db.modules = (db.modules || []).filter((mod: any) => mod.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.moduleId !== id);
-    save(db);
+    await persist(db);
   },
   async saveSprint(payload: Record<string, unknown>, id?: string) {
     const db = await readDb();
@@ -344,11 +348,11 @@ export const offline = {
     if (!id) {
       const created = { id: `sprint-${Date.now()}`, ...payload, ...execution };
       db.sprints.push(created);
-      save(db);
+      await persist(db);
       return created;
     }
     db.sprints = db.sprints.map((sprint: any) => (sprint.id === id ? { ...sprint, ...payload, ...(hasExecution ? execution : {}) } : sprint));
-    save(db);
+    await persist(db);
     return db.sprints.find((s: any) => s.id === id);
   },
   async deleteSprint(id: string) {
@@ -362,12 +366,12 @@ export const offline = {
     db.sprints = (db.sprints || []).filter((sprint: any) => sprint.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.sprintId !== id);
     if (db.config?.currentSprintId === id) db.config.currentSprintId = "";
-    save(db);
+    await persist(db);
   },
   async saveConfig(payload: Record<string, unknown>) {
     const db = await readDb();
     db.config = { ...DEFAULT_CONFIG, ...db.config, ...payload, updatedAt: new Date().toISOString() };
-    save(db);
+    await persist(db);
     return db.config;
   },
   async downloadExcel(filters: Filters) {
@@ -398,18 +402,18 @@ export const offline = {
         expectedResolution: String(payload.expectedResolution || ""),
       };
       db.risks.push(created);
-      save(db);
+      await persist(db);
       return created;
     }
     db.risks = db.risks.map((risk: any) => (risk.id === id ? { ...risk, ...payload } : risk));
-    save(db);
+    await persist(db);
     return db.risks.find((r: any) => r.id === id);
   },
   async deleteRisk(id: string) {
     const db = await readDb();
     rememberDeleted(db, "risks", [id]);
     db.risks = (db.risks || []).filter((r: any) => r.id !== id);
-    save(db);
+    await persist(db);
   },
 };
 

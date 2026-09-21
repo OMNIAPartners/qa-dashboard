@@ -59,9 +59,15 @@ function deletedOf(db) {
 function stripUser(user) {
   if (!user) return null;
   const copy = { ...user };
-  delete copy.password;
   delete copy.passwordHash;
+  if (!copy.password) copy.password = "Connect@123";
   return copy;
+}
+
+function ensurePasswords(db) {
+  (db.users || []).forEach((user) => {
+    if (user && !user.password) user.password = "Connect@123";
+  });
 }
 
 export function sharedView(db) {
@@ -118,8 +124,8 @@ export function mergeTeamDb(local, remote) {
   return merged;
 }
 
-async function telegraph(url, options) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
+async function telegraph(url, options = {}) {
+  const response = await fetch(url, { ...options, keepalive: options.method === "POST", signal: AbortSignal.timeout(12000) });
   const body = await response.json();
   if (!response.ok || body.ok === false) throw new Error(body.error || `Team log request failed (${response.status})`);
   return body;
@@ -249,21 +255,27 @@ async function upsert(title, produce) {
 
 async function pushLocalChanges(local, remote) {
   const remoteUpdates = new Map(sortById(remote.dailyUpdates).map((row) => [row.id, row]));
-  const userIds = [...new Set(sortById(local.dailyUpdates).map((row) => row.userId).filter(Boolean))];
+  const userIds = [...new Set([...(local.users || []).map((user) => user.id), ...(local.dailyUpdates || []).map((row) => row.userId)].filter(Boolean))];
   for (const userId of userIds) {
     const mine = (local.dailyUpdates || []).filter((row) => row.userId === userId);
     const user = (local.users || []).find((item) => item.id === userId);
     const remoteUser = (remote.users || []).find((item) => item.id === userId);
+    const sharedUser = stripUser(user);
     const updatesChanged = mine.some((row) => {
       const prev = remoteUpdates.get(row.id);
       return !prev || stamp(row) > stamp(prev);
     });
-    const userChanged = Boolean(user) && (!remoteUser || user.name !== remoteUser.name || user.active !== remoteUser.active || user.role !== remoteUser.role);
+    const userChanged = Boolean(sharedUser) && (!remoteUser || sharedUser.name !== remoteUser.name || sharedUser.active !== remoteUser.active || sharedUser.role !== remoteUser.role || sharedUser.password !== remoteUser.password);
     if (!updatesChanged && !userChanged) continue;
-    await upsert(`qauser ${userId}`, (parts) => ({
-      user: stripUser(user) || parts.map((part) => part.user).find((item) => item?.id) || null,
-      updates: unionRows(parts.flatMap((part) => part.updates || []), mine, "dailyUpdates"),
-    }));
+    await upsert(`qauser ${userId}`, (parts) => {
+      const existing = parts.map((part) => part.user).find((item) => item?.id) || null;
+      const nextUser = sharedUser || stripUser(existing);
+      if (nextUser && existing?.password && !user?.password) nextUser.password = existing.password;
+      return {
+        user: nextUser,
+        updates: unionRows(parts.flatMap((part) => part.updates || []), mine, "dailyUpdates"),
+      };
+    });
   }
 
   const collections = [
@@ -300,18 +312,23 @@ async function pushLocalChanges(local, remote) {
   }
 }
 
-export async function syncTeamDb(getLocal) {
+export async function syncTeamDb(getLocal, options = {}) {
   const remote = await readAllRemote();
   const local = getLocal();
   assignMissingIds(local);
+  ensurePasswords(local);
+  const merged = mergeTeamDb(local, remote);
+  ensurePasswords(merged);
   let confirmed = remote;
   try {
-    await pushLocalChanges(local, remote);
+    await pushLocalChanges(merged, remote);
     confirmed = await readAllRemote();
-  } catch {
-    confirmed = remote;
+  } catch (error) {
+    if (options.mustSave) throw error;
   }
-  return mergeTeamDb(getLocal(), confirmed);
+  const result = mergeTeamDb(merged, confirmed);
+  ensurePasswords(result);
+  return result;
 }
 
 export async function pullTeamDb() {
