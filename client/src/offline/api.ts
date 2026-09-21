@@ -259,6 +259,12 @@ export const offline = {
     save(db);
     return db.modules.find((m: any) => m.id === id);
   },
+  deleteModule(id: string) {
+    const db = load();
+    db.modules = (db.modules || []).filter((mod: any) => mod.id !== id);
+    db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.moduleId !== id);
+    save(db);
+  },
   saveSprint(payload: Record<string, unknown>, id?: string) {
     const db = load();
     const executionKeys = ["inSprintAutoExecuted", "inSprintAutoPassed", "inSprintAutoFailed", "inSprintAutoBlocked", "inSprintExecutionNotes"];

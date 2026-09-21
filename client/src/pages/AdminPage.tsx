@@ -1,7 +1,7 @@
 import { Alert, Button, Card, FormControlLabel, Grid, MenuItem, Stack, Switch, TextField, Typography } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import { useEffect, useState } from "react";
-import { listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
+import { deleteModule, listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
 import { useApp } from "../appState";
 import { useAuth } from "../auth";
 import type { Module, User } from "../types";
@@ -284,6 +284,27 @@ export function AdminPage() {
                 width: 130,
                 renderCell: (params) => (
                   <GridNumericBox row={params.row} field="apiAutomated" onSave={(next) => saveBaseline(next)} />
+                ),
+              },
+              {
+                field: "actions",
+                headerName: "",
+                width: 110,
+                sortable: false,
+                filterable: false,
+                disableColumnMenu: true,
+                renderCell: (params) => (
+                  <Button
+                    color="error"
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!window.confirm(`Delete ${params.row.name}?`)) return;
+                      void run(() => deleteModule(params.row.id), `${params.row.name} deleted.`);
+                    }}
+                  >
+                    Delete
+                  </Button>
                 ),
               },
             ]}

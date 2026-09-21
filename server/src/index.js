@@ -468,6 +468,17 @@ app.put("/api/modules/:id", auth(["lead", "admin"]), (req, res) => {
   res.json(updated);
 });
 
+app.delete("/api/modules/:id", auth(["lead", "admin"]), (req, res) => {
+  const current = getDb().modules.find((m) => m.id === req.params.id);
+  if (!current) return res.status(404).json({ message: "Module not found." });
+  saveDb((state) => {
+    state.modules = state.modules.filter((mod) => mod.id !== req.params.id);
+    state.dailyUpdates = state.dailyUpdates.filter((row) => row.moduleId !== req.params.id);
+    return state;
+  });
+  res.json({ ok: true });
+});
+
 app.post("/api/sprints", auth(["lead", "admin"]), (req, res) => {
   const { sprintName, startDate, endDate, plannedTestCases, project } = req.body || {};
   if (!sprintName || !startDate || !endDate) {

@@ -124,6 +124,11 @@ export async function saveModule(payload: Record<string, unknown>, id?: string) 
   return data;
 }
 
+export async function deleteModule(id: string) {
+  if (isOfflineMode()) return offline.deleteModule(id);
+  await api.delete(`/modules/${id}`);
+}
+
 export async function saveSprint(payload: Record<string, unknown>, id?: string) {
   if (isOfflineMode()) return offline.saveSprint(payload, id);
   const { data } = id ? await api.put(`/sprints/${id}`, payload) : await api.post("/sprints", payload);
