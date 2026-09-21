@@ -13,7 +13,7 @@ export function AdminPage() {
   const [error, setError] = useState("");
   const [allUsers, setAllUsers] = useState<User[]>(users);
   const [userForm, setUserForm] = useState({ name: "", email: "", role: "qa", password: "Connect@123" });
-  const [moduleForm, setModuleForm] = useState({ name: "", project: "Connect", isFeeShare: false, totalTestCases: 0, manualWritten: 0, uiAutomated: 0, apiRecorded: 0, apiAutomated: 0 });
+  const [moduleForm, setModuleForm] = useState({ name: "", project: "Connect", totalTestCases: 0, manualWritten: 0, uiAutomated: 0, apiRecorded: 0, apiAutomated: 0 });
   const [sprintForm, setSprintForm] = useState({ sprintName: "", project: "Connect", startDate: "", endDate: "", plannedTestCases: 0 });
   const [cfg, setCfg] = useState(config);
 
@@ -94,32 +94,25 @@ export function AdminPage() {
           Daily updates never overwrite these baseline numbers. Only administrators should change locked Connect scope.
         </Typography>
         <Grid container spacing={2}>
-          <Grid item xs={12} md={3}><TextField fullWidth label="Name" value={moduleForm.name} onChange={(e) => setModuleForm({ ...moduleForm, name: e.target.value })} /></Grid>
+          <Grid item xs={12} md={3}><TextField fullWidth label="Module Name" value={moduleForm.name} onChange={(e) => setModuleForm({ ...moduleForm, name: e.target.value })} /></Grid>
           <Grid item xs={12} md={2}>
             <TextField select fullWidth label="Project" value={moduleForm.project} onChange={(e) => setModuleForm({ ...moduleForm, project: e.target.value })}>
               <MenuItem value="Connect">Connect</MenuItem>
               <MenuItem value="Force">Force</MenuItem>
             </TextField>
           </Grid>
-          <Grid item xs={12} md={2}>
-            <TextField select fullWidth label="FeeShare" value={moduleForm.isFeeShare ? "yes" : "no"} onChange={(e) => setModuleForm({ ...moduleForm, isFeeShare: e.target.value === "yes" })}>
-              <MenuItem value="no">No</MenuItem>
-              <MenuItem value="yes">Yes</MenuItem>
-            </TextField>
-          </Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="number" label="Total TC" value={moduleForm.totalTestCases} onChange={(e) => setModuleForm({ ...moduleForm, totalTestCases: Number(e.target.value) })} /></Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="number" label="Manual" value={moduleForm.manualWritten} onChange={(e) => setModuleForm({ ...moduleForm, manualWritten: Number(e.target.value) })} /></Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="number" label="UI Automated" value={moduleForm.uiAutomated} onChange={(e) => setModuleForm({ ...moduleForm, uiAutomated: Number(e.target.value) })} /></Grid>
           <Grid item xs={6} md={2}><TextField fullWidth type="number" label="API Rec." value={moduleForm.apiRecorded} onChange={(e) => setModuleForm({ ...moduleForm, apiRecorded: Number(e.target.value) })} /></Grid>
-          <Grid item xs={6} md={2}><Button variant="contained" onClick={() => run(() => saveModule(moduleForm), "Module added.")}>Add Module</Button></Grid>
+          <Grid item xs={6} md={2}><Button variant="contained" onClick={() => run(() => saveModule({ ...moduleForm, isFeeShare: /feeshare/i.test(moduleForm.name) }), "Module added.")}>Add Module</Button></Grid>
         </Grid>
         <div style={{ height: 380, marginTop: 16 }}>
           <DataGrid
             rows={modules}
             columns={[
-              { field: "name", headerName: "Module", flex: 1, minWidth: 180, editable: true },
+              { field: "name", headerName: "Module Name", flex: 1, minWidth: 180, editable: true },
               { field: "project", headerName: "Project", width: 110, editable: true },
-              { field: "isFeeShare", headerName: "FeeShare", width: 110, type: "boolean", editable: true },
               { field: "totalTestCases", headerName: "Total TC", width: 110, editable: true },
               { field: "manualWritten", headerName: "Manual", width: 110, editable: true },
               { field: "uiAutomated", headerName: "UI Baseline", width: 120, editable: true },
@@ -127,7 +120,7 @@ export function AdminPage() {
               { field: "apiAutomated", headerName: "API Auto", width: 110, editable: true },
             ]}
             processRowUpdate={async (next) => {
-              await saveModule({ ...next, baselineChange: true }, next.id);
+              await saveModule({ ...next, isFeeShare: /feeshare/i.test(String(next.name || "")), baselineChange: true }, next.id);
               await refresh();
               return next;
             }}

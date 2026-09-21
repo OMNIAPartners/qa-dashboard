@@ -135,7 +135,7 @@ export function ProjectDashboardPage({ project }: { project: ProjectName }) {
         <Card sx={{ p: 2.5 }}>
           <Typography variant="h6">Force FeeShare</Typography>
           {!fee ? (
-            <Alert severity="info" sx={{ mt: 1 }}>Not Available — add a FeeShare module in Administration or Daily Update.</Alert>
+            <Alert severity="info" sx={{ mt: 1 }}>Not Available — add a Force module named FeeShare in Administration or Daily Update.</Alert>
           ) : (
             <Stack spacing={2} sx={{ mt: 2 }}>
               <KpiGrid>
