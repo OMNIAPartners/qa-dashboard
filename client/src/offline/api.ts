@@ -1,12 +1,18 @@
 import type { DailyUpdate, DashboardData, Filters, User } from "../types";
 import { bimonthly, buildDashboard, DEFAULT_CONFIG, moduleSnapshot, resolveAutomationTotals, weeklyStatus } from "./analytics";
 import { createSeed, WORK_TYPES } from "./seed";
+import { syncTeamDb } from "./teamSync";
 
 const KEY = "connect-qa-offline-db-v5";
 const SESSION = "connect-qa-offline-user";
 
 function publicUser(user: any): User {
   return { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active };
+}
+
+function writeLocal(db: any) {
+  localStorage.setItem(KEY, JSON.stringify(db));
+  return db;
 }
 
 function load() {
@@ -18,17 +24,51 @@ function load() {
     if (!existing) db.users = [...(db.users || []), seedUser];
     else if (!existing.password) existing.password = seedUser.password;
   });
-  localStorage.setItem(KEY, JSON.stringify(db));
-  return db;
+  return writeLocal(db);
+}
+
+let syncTail = Promise.resolve();
+let syncedAt = 0;
+
+function enqueueSync<T>(task: () => Promise<T>) {
+  const run = syncTail.then(task, task);
+  syncTail = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
 function save(db: any) {
-  localStorage.setItem(KEY, JSON.stringify(db));
+  writeLocal(db);
+  if (isOfflineMode()) {
+    enqueueSync(async () => {
+      const merged = await syncTeamDb(load);
+      writeLocal(merged);
+      syncedAt = Date.now();
+    }).catch(() => undefined);
+  }
   return db;
 }
 
 async function readDb() {
-  return load();
+  return enqueueSync(async () => {
+    const local = load();
+    if (!isOfflineMode() || Date.now() - syncedAt < 2500) return local;
+    try {
+      const merged = await syncTeamDb(load);
+      writeLocal(merged);
+      syncedAt = Date.now();
+      return load();
+    } catch {
+      return local;
+    }
+  });
+}
+
+function rememberDeleted(db: any, bucket: string, ids: string[]) {
+  const current = Array.isArray(db.deleted?.[bucket]) ? db.deleted[bucket] : [];
+  db.deleted = { ...(db.deleted || {}), [bucket]: Array.from(new Set([...current, ...ids.filter(Boolean)])) };
 }
 
 function currentUser() {
@@ -272,6 +312,12 @@ export const offline = {
   },
   async deleteModule(id: string) {
     const db = await readDb();
+    rememberDeleted(db, "modules", [id]);
+    rememberDeleted(
+      db,
+      "dailyUpdates",
+      (db.dailyUpdates || []).filter((row: any) => row.moduleId === id).map((row: any) => row.id)
+    );
     db.modules = (db.modules || []).filter((mod: any) => mod.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.moduleId !== id);
     save(db);
@@ -307,6 +353,12 @@ export const offline = {
   },
   async deleteSprint(id: string) {
     const db = await readDb();
+    rememberDeleted(db, "sprints", [id]);
+    rememberDeleted(
+      db,
+      "dailyUpdates",
+      (db.dailyUpdates || []).filter((row: any) => row.sprintId === id).map((row: any) => row.id)
+    );
     db.sprints = (db.sprints || []).filter((sprint: any) => sprint.id !== id);
     db.dailyUpdates = (db.dailyUpdates || []).filter((row: any) => row.sprintId !== id);
     if (db.config?.currentSprintId === id) db.config.currentSprintId = "";
@@ -314,7 +366,7 @@ export const offline = {
   },
   async saveConfig(payload: Record<string, unknown>) {
     const db = await readDb();
-    db.config = { ...DEFAULT_CONFIG, ...db.config, ...payload };
+    db.config = { ...DEFAULT_CONFIG, ...db.config, ...payload, updatedAt: new Date().toISOString() };
     save(db);
     return db.config;
   },
@@ -355,6 +407,7 @@ export const offline = {
   },
   async deleteRisk(id: string) {
     const db = await readDb();
+    rememberDeleted(db, "risks", [id]);
     db.risks = (db.risks || []).filter((r: any) => r.id !== id);
     save(db);
   },

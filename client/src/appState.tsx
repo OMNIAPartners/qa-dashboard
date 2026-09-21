@@ -15,7 +15,7 @@ interface AppModel {
   sprints: Sprint[];
   workTypes: string[];
   config: AppConfig | null;
-  refresh: () => Promise<void>;
+  refresh: (silent?: boolean) => Promise<void>;
   applyDashboard: (dash: DashboardData) => void;
   loading: boolean;
   clientView: boolean;
@@ -47,8 +47,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [clientView, setClientView] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [meta, dash] = await Promise.all([getMeta(), getDashboard(filters)]);
       setUsers(meta.users);
@@ -58,7 +58,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setConfig(meta.config);
       setDashboard(dash);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [filters]);
 
@@ -72,13 +72,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(true);
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh(true);
+    }, 15000);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
+      window.clearInterval(timer);
     };
   }, [refresh]);
 
