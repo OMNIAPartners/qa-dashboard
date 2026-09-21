@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { deleteModule, deleteSprint, listUsers, saveConfig, saveModule, saveSprint, saveUser } from "../api/client";
 import { useApp } from "../appState";
 import { useAuth } from "../auth";
-import type { Module, User } from "../types";
+import type { Module, Sprint, User } from "../types";
 
 type NumberOrBlank = number | "";
 
@@ -48,9 +48,9 @@ function GridNumericBox({
   field,
   onSave,
 }: {
-  row: Module;
-  field: keyof Pick<Module, "totalTestCases" | "manualWritten" | "uiAutomated" | "apiRecorded" | "apiAutomated">;
-  onSave: (next: Module) => void;
+  row: { id: string } & Record<string, unknown>;
+  field: string;
+  onSave: (next: Record<string, unknown>) => void;
 }) {
   const current = Number(row[field] || 0);
   const [draft, setDraft] = useState(String(current));
@@ -81,6 +81,43 @@ function GridNumericBox({
         if (event.key === "Enter") (event.target as HTMLInputElement).blur();
       }}
       sx={{ "& .MuiInputBase-input": { py: 0.75, textAlign: "right" } }}
+    />
+  );
+}
+
+function GridTextBox({
+  value,
+  type = "text",
+  onSave,
+}: {
+  value: string;
+  type?: string;
+  onSave: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value || "");
+
+  useEffect(() => {
+    setDraft(value || "");
+  }, [value]);
+
+  return (
+    <TextField
+      size="small"
+      fullWidth
+      type={type}
+      value={draft}
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft === value) return;
+        onSave(draft);
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
+      sx={{ "& .MuiInputBase-input": { py: 0.75 } }}
     />
   );
 }
@@ -143,6 +180,30 @@ export function AdminPage() {
         ),
       "Module updated."
     );
+  }
+
+  function saveSprintPatch(row: Sprint, patch: Record<string, unknown>) {
+    const next = { ...row, ...patch };
+    const payload: Record<string, unknown> = {
+      sprintName: next.sprintName,
+      project: next.project === "Force" ? "Force" : "Connect",
+      startDate: next.startDate,
+      endDate: next.endDate,
+      plannedTestCases: Number(next.plannedTestCases || 0),
+    };
+    const touchedExecution = ["inSprintAutoExecuted", "inSprintAutoPassed", "inSprintAutoFailed", "inSprintAutoBlocked"].some((key) => key in patch);
+    if (touchedExecution) {
+      const passed = Number(next.inSprintAutoPassed || 0);
+      const failed = Number(next.inSprintAutoFailed || 0);
+      const blocked = Number(next.inSprintAutoBlocked || 0);
+      payload.inSprintAutoPassed = passed;
+      payload.inSprintAutoFailed = failed;
+      payload.inSprintAutoBlocked = blocked;
+      payload.inSprintAutoExecuted =
+        "inSprintAutoExecuted" in patch ? Number(next.inSprintAutoExecuted || 0) : passed + failed + blocked;
+      payload.inSprintExecutionNotes = next.inSprintExecutionNotes || "";
+    }
+    void run(() => saveSprint(payload, next.id), "Sprint updated.");
   }
 
   return (
@@ -328,7 +389,7 @@ export function AdminPage() {
       <Card sx={{ p: 3 }}>
         <Typography variant="h6">Sprints</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-          After a sprint ends, enter the in-sprint automation execution result here or on Sprint Progress.
+          Click any box and type. Total TC and execution numbers save when you leave the field.
         </Typography>
         <Grid container spacing={2} sx={{ mt: 1 }}>
           <Grid item xs={12} md={3}><TextField fullWidth label="Sprint name" value={sprintForm.sprintName} onChange={(e) => setSprintForm({ ...sprintForm, sprintName: e.target.value })} /></Grid>
@@ -350,7 +411,10 @@ export function AdminPage() {
               sx={{ height: "56px" }}
               onClick={() => run(async () => {
                 await saveSprint({
-                  ...sprintForm,
+                  sprintName: sprintForm.sprintName.trim(),
+                  project: sprintForm.project,
+                  startDate: sprintForm.startDate,
+                  endDate: sprintForm.endDate,
                   plannedTestCases: toCount(sprintForm.plannedTestCases),
                 });
                 setSprintForm({ sprintName: "", project: sprintForm.project, startDate: "", endDate: "", plannedTestCases: "" });
@@ -360,23 +424,98 @@ export function AdminPage() {
             </Button>
           </Grid>
         </Grid>
-        <div style={{ height: 320, marginTop: 16 }}>
+        <div style={{ height: 360, marginTop: 16 }}>
           <DataGrid
             rows={sprints}
             disableRowSelectionOnClick
             disableVirtualization
             rowHeight={56}
-            sx={{ "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" } }}
+            sx={{ "& .MuiDataGrid-cell": { display: "flex", alignItems: "center", overflow: "visible" } }}
             columns={[
-              { field: "sprintName", headerName: "Sprint", flex: 1, minWidth: 140, editable: true },
-              { field: "project", headerName: "Project", width: 110, editable: true },
-              { field: "startDate", headerName: "Start", width: 120, editable: true },
-              { field: "endDate", headerName: "End", width: 120, editable: true },
-              { field: "plannedTestCases", headerName: "Total TC", width: 120, type: "number", editable: true },
-              { field: "inSprintAutoExecuted", headerName: "Auto Executed", width: 130, type: "number", editable: true },
-              { field: "inSprintAutoPassed", headerName: "Passed", width: 100, type: "number", editable: true },
-              { field: "inSprintAutoFailed", headerName: "Failed", width: 100, type: "number", editable: true },
-              { field: "inSprintAutoBlocked", headerName: "Blocked", width: 100, type: "number", editable: true },
+              {
+                field: "sprintName",
+                headerName: "Sprint",
+                flex: 1,
+                minWidth: 140,
+                renderCell: (params) => (
+                  <GridTextBox value={String(params.row.sprintName || "")} onSave={(sprintName) => saveSprintPatch(params.row, { sprintName })} />
+                ),
+              },
+              {
+                field: "project",
+                headerName: "Project",
+                width: 120,
+                renderCell: (params) => (
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={params.row.project === "Force" ? "Force" : "Connect"}
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(event) => saveSprintPatch(params.row, { project: event.target.value })}
+                  >
+                    <MenuItem value="Connect">Connect</MenuItem>
+                    <MenuItem value="Force">Force</MenuItem>
+                  </TextField>
+                ),
+              },
+              {
+                field: "startDate",
+                headerName: "Start",
+                width: 150,
+                renderCell: (params) => (
+                  <GridTextBox type="date" value={String(params.row.startDate || "")} onSave={(startDate) => saveSprintPatch(params.row, { startDate })} />
+                ),
+              },
+              {
+                field: "endDate",
+                headerName: "End",
+                width: 150,
+                renderCell: (params) => (
+                  <GridTextBox type="date" value={String(params.row.endDate || "")} onSave={(endDate) => saveSprintPatch(params.row, { endDate })} />
+                ),
+              },
+              {
+                field: "plannedTestCases",
+                headerName: "Total TC",
+                width: 120,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="plannedTestCases" onSave={(next) => saveSprintPatch(params.row, { plannedTestCases: next.plannedTestCases })} />
+                ),
+              },
+              {
+                field: "inSprintAutoExecuted",
+                headerName: "Auto Executed",
+                width: 130,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="inSprintAutoExecuted" onSave={(next) => saveSprintPatch(params.row, { inSprintAutoExecuted: next.inSprintAutoExecuted })} />
+                ),
+              },
+              {
+                field: "inSprintAutoPassed",
+                headerName: "Passed",
+                width: 110,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="inSprintAutoPassed" onSave={(next) => saveSprintPatch(params.row, { inSprintAutoPassed: next.inSprintAutoPassed })} />
+                ),
+              },
+              {
+                field: "inSprintAutoFailed",
+                headerName: "Failed",
+                width: 110,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="inSprintAutoFailed" onSave={(next) => saveSprintPatch(params.row, { inSprintAutoFailed: next.inSprintAutoFailed })} />
+                ),
+              },
+              {
+                field: "inSprintAutoBlocked",
+                headerName: "Blocked",
+                width: 110,
+                renderCell: (params) => (
+                  <GridNumericBox row={params.row} field="inSprintAutoBlocked" onSave={(next) => saveSprintPatch(params.row, { inSprintAutoBlocked: next.inSprintAutoBlocked })} />
+                ),
+              },
               {
                 field: "actions",
                 headerName: "Delete",
@@ -399,26 +538,6 @@ export function AdminPage() {
                 ),
               },
             ]}
-            processRowUpdate={async (next) => {
-              await saveSprint(
-                {
-                  sprintName: next.sprintName,
-                  project: next.project === "Force" ? "Force" : "Connect",
-                  startDate: next.startDate,
-                  endDate: next.endDate,
-                  plannedTestCases: Number(next.plannedTestCases || 0),
-                  inSprintAutoExecuted: Number(next.inSprintAutoExecuted || 0),
-                  inSprintAutoPassed: Number(next.inSprintAutoPassed || 0),
-                  inSprintAutoFailed: Number(next.inSprintAutoFailed || 0),
-                  inSprintAutoBlocked: Number(next.inSprintAutoBlocked || 0),
-                  inSprintExecutionNotes: next.inSprintExecutionNotes || "",
-                },
-                next.id
-              );
-              await refresh();
-              return next;
-            }}
-            onProcessRowUpdateError={(err) => setError(err?.message || "Unable to update sprint.")}
           />
         </div>
       </Card>

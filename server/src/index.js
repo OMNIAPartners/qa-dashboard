@@ -533,7 +533,7 @@ app.put("/api/sprints/:id", auth(), (req, res) => {
   const isManager = req.user.role === "admin" || req.user.role === "lead";
   const execution = sprintExecutionFields(req.body || {}, current);
   const resultTotal = execution.inSprintAutoPassed + execution.inSprintAutoFailed + execution.inSprintAutoBlocked;
-  if (resultTotal !== execution.inSprintAutoExecuted) {
+  if (resultTotal > 0 && execution.inSprintAutoExecuted > 0 && resultTotal !== execution.inSprintAutoExecuted) {
     return res.status(400).json({ message: "Passed + Failed + Blocked must equal the in-sprint automation test cases executed." });
   }
   let updated;

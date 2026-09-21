@@ -278,7 +278,8 @@ export const offline = {
     };
     if (hasExecution) {
       const resultTotal = Number(execution.inSprintAutoPassed) + Number(execution.inSprintAutoFailed) + Number(execution.inSprintAutoBlocked);
-      if (resultTotal !== Number(execution.inSprintAutoExecuted)) {
+      const executed = Number(execution.inSprintAutoExecuted);
+      if (resultTotal > 0 && executed > 0 && resultTotal !== executed) {
         throw { response: { data: { message: "Passed + Failed + Blocked must equal the in-sprint automation test cases executed." } } };
       }
       execution.inSprintExecutionRecordedAt = new Date().toISOString();
