@@ -1,5 +1,5 @@
-const PAGE = "Connect-QA-Team-Log-09-21";
 const TOKEN = "359c955b05b88cd96f61d86bf2f7b43c3e6f3dcfef235bf955856eb6a7d6";
+const LEGACY_PATH = "Connect-QA-Team-Log-09-21";
 const BUCKETS = ["users", "modules", "sprints", "dailyUpdates", "risks"];
 const MODULE_NUMBERS = ["totalTestCases", "manualWritten", "uiAutomated", "apiRecorded", "apiAutomated"];
 
@@ -47,19 +47,26 @@ function stable(value) {
   return value;
 }
 
+function same(left, right) {
+  return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
+}
+
 function deletedOf(db) {
   const src = db?.deleted || {};
   return Object.fromEntries(BUCKETS.map((key) => [key, [...new Set(src[key] || [])].filter(Boolean).sort()]));
 }
 
+function stripUser(user) {
+  if (!user) return null;
+  const copy = { ...user };
+  delete copy.password;
+  delete copy.passwordHash;
+  return copy;
+}
+
 export function sharedView(db) {
   const view = emptyShared();
-  view.users = sortById(db?.users).map((user) => {
-    const copy = { ...user };
-    delete copy.password;
-    delete copy.passwordHash;
-    return copy;
-  });
+  view.users = sortById(db?.users).map(stripUser);
   view.modules = sortById(db?.modules);
   view.sprints = sortById(db?.sprints);
   view.dailyUpdates = sortById(db?.dailyUpdates);
@@ -111,41 +118,202 @@ export function mergeTeamDb(local, remote) {
   return merged;
 }
 
-async function request(url, options) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8000) });
+async function telegraph(url, options) {
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
   const body = await response.json();
   if (!response.ok || body.ok === false) throw new Error(body.error || `Team log request failed (${response.status})`);
   return body;
 }
 
-export async function pullTeamDb() {
-  const body = await request(`https://api.telegra.ph/getPage/${PAGE}?return_content=true`);
-  const text = textFromContent(body.result?.content);
-  if (!text.trim()) return emptyShared();
-  const parsed = JSON.parse(text);
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.dailyUpdates)) throw new Error("Team log payload was not readable.");
-  return parsed;
+async function listPages() {
+  const pages = [];
+  let offset = 0;
+  while (offset < 500) {
+    const body = await telegraph(`https://api.telegra.ph/getPageList?access_token=${TOKEN}&limit=50&offset=${offset}`);
+    const batch = body.result?.pages || [];
+    pages.push(...batch);
+    const total = body.result?.total_count || pages.length;
+    if (!batch.length || pages.length >= total) break;
+    offset += batch.length;
+  }
+  return pages;
 }
 
-export async function pushTeamDb(view) {
+async function readPage(path) {
+  const response = await fetch(`https://api.telegra.ph/getPage/${path}?return_content=true`, { signal: AbortSignal.timeout(12000) });
+  const body = await response.json();
+  if (!body.ok) return null;
+  const text = textFromContent(body.result?.content);
+  if (!text.trim()) return null;
+  return JSON.parse(text);
+}
+
+function pageBody(data) {
+  return JSON.stringify([{ tag: "pre", children: [JSON.stringify(data)] }]);
+}
+
+async function createPage(title, data) {
   const form = new URLSearchParams();
   form.set("access_token", TOKEN);
-  form.set("title", "Connect QA Team Log");
-  form.set("content", JSON.stringify([{ tag: "pre", children: [JSON.stringify(view)] }]));
-  await request(`https://api.telegra.ph/editPage/${PAGE}`, {
+  form.set("title", title);
+  form.set("content", pageBody(data));
+  await telegraph("https://api.telegra.ph/createPage", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: form,
   });
 }
 
-export async function syncTeamDb(getLocal) {
-  const remote = await pullTeamDb();
-  let merged = mergeTeamDb(getLocal(), remote);
-  const view = sharedView(merged);
-  if (JSON.stringify(stable(view)) !== JSON.stringify(stable(sharedView(remote)))) {
-    await pushTeamDb(view);
-    merged = mergeTeamDb(getLocal(), merged);
+async function editPage(path, title, data) {
+  const form = new URLSearchParams();
+  form.set("access_token", TOKEN);
+  form.set("title", title);
+  form.set("content", pageBody(data));
+  await telegraph(`https://api.telegra.ph/editPage/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form,
+  });
+}
+
+function assignMissingIds(db) {
+  const stampId = (rows, prefix) => {
+    (rows || []).forEach((row) => {
+      if (row && !row.id) row.id = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    });
+  };
+  stampId(db.users, "user");
+  stampId(db.modules, "mod");
+  stampId(db.sprints, "sprint");
+  stampId(db.dailyUpdates, "du");
+  stampId(db.risks, "risk");
+}
+
+async function readAllRemote() {
+  const [pages, legacy] = await Promise.all([listPages(), readPage(LEGACY_PATH)]);
+  const selected = pages.filter((page) => page.title?.startsWith("qauser ") || page.title?.startsWith("qashared "));
+  const shards = await Promise.all(selected.map(async (page) => ({ title: page.title, data: await readPage(page.path) })));
+  let remote = emptyShared();
+  if (legacy && Array.isArray(legacy.dailyUpdates)) remote = mergeTeamDb(remote, legacy);
+  shards.forEach(({ title, data }) => {
+    if (!data) return;
+    if (title.startsWith("qauser ")) {
+      remote = mergeTeamDb(remote, {
+        users: data.user?.id ? [data.user] : [],
+        dailyUpdates: data.updates || [],
+      });
+      return;
+    }
+    if (title === "qashared modules") remote = mergeTeamDb(remote, { modules: data.modules || [] });
+    if (title === "qashared sprints") remote = mergeTeamDb(remote, { sprints: data.sprints || [] });
+    if (title === "qashared risks") remote = mergeTeamDb(remote, { risks: data.risks || [] });
+    if (title === "qashared deleted") remote = mergeTeamDb(remote, { deleted: data.deleted || {} });
+    if (title === "qashared config") remote = mergeTeamDb(remote, { config: data.config || {} });
+  });
+  return remote;
+}
+
+function unionRows(remoteRows, localRows, bucket) {
+  const map = new Map();
+  sortById(remoteRows).forEach((row) => map.set(row.id, row));
+  sortById(localRows).forEach((row) => map.set(row.id, mergeRow(row, map.get(row.id), bucket)));
+  return sortById([...map.values()]);
+}
+
+function changedRows(localRows, remoteRows, bucket) {
+  const remoteById = new Map(sortById(remoteRows).map((row) => [row.id, row]));
+  return sortById(localRows).filter((row) => {
+    const prev = remoteById.get(row.id);
+    if (!prev) return true;
+    if (stamp(row) > stamp(prev)) return true;
+    if (bucket === "modules") return MODULE_NUMBERS.some((key) => Number(row[key] || 0) > Number(prev[key] || 0));
+    return false;
+  });
+}
+
+async function upsert(title, produce) {
+  const matches = (await listPages()).filter((page) => page.title === title);
+  const current = [];
+  for (const page of matches) {
+    const parsed = await readPage(page.path);
+    if (parsed) current.push(parsed);
   }
-  return merged;
+  const next = produce(current);
+  if (matches.length === 1 && same(current[0], next)) return;
+  if (!matches.length) {
+    await createPage(title, next);
+    return;
+  }
+  for (const page of matches) await editPage(page.path, title, next);
+}
+
+async function pushLocalChanges(local, remote) {
+  const remoteUpdates = new Map(sortById(remote.dailyUpdates).map((row) => [row.id, row]));
+  const userIds = [...new Set(sortById(local.dailyUpdates).map((row) => row.userId).filter(Boolean))];
+  for (const userId of userIds) {
+    const mine = (local.dailyUpdates || []).filter((row) => row.userId === userId);
+    const user = (local.users || []).find((item) => item.id === userId);
+    const remoteUser = (remote.users || []).find((item) => item.id === userId);
+    const updatesChanged = mine.some((row) => {
+      const prev = remoteUpdates.get(row.id);
+      return !prev || stamp(row) > stamp(prev);
+    });
+    const userChanged = Boolean(user) && (!remoteUser || user.name !== remoteUser.name || user.active !== remoteUser.active || user.role !== remoteUser.role);
+    if (!updatesChanged && !userChanged) continue;
+    await upsert(`qauser ${userId}`, (parts) => ({
+      user: stripUser(user) || parts.map((part) => part.user).find((item) => item?.id) || null,
+      updates: unionRows(parts.flatMap((part) => part.updates || []), mine, "dailyUpdates"),
+    }));
+  }
+
+  const collections = [
+    ["qashared modules", "modules", local.modules, remote.modules],
+    ["qashared sprints", "sprints", local.sprints, remote.sprints],
+    ["qashared risks", "risks", local.risks, remote.risks],
+  ];
+  for (const [title, bucket, localRows, remoteRows] of collections) {
+    if (!changedRows(localRows, remoteRows, bucket).length) continue;
+    await upsert(title, (parts) => ({
+      [bucket]: unionRows(parts.flatMap((part) => part[bucket] || []), localRows, bucket),
+    }));
+  }
+
+  const remoteDeleted = deletedOf(remote);
+  const localDeleted = deletedOf(local);
+  const deletedChanged = BUCKETS.some((key) => (localDeleted[key] || []).some((id) => !(remoteDeleted[key] || []).includes(id)));
+  if (deletedChanged) {
+    await upsert("qashared deleted", (parts) => {
+      const deleted = emptyShared().deleted;
+      [...parts.map((part) => deletedOf(part)), localDeleted].forEach((source) => {
+        BUCKETS.forEach((key) => {
+          deleted[key] = [...new Set([...deleted[key], ...(source[key] || [])])].sort();
+        });
+      });
+      return { deleted };
+    });
+  }
+
+  const localConfig = local.config || {};
+  const remoteConfig = remote.config || {};
+  if ((Date.parse(localConfig.updatedAt || "") || 0) > (Date.parse(remoteConfig.updatedAt || "") || 0)) {
+    await upsert("qashared config", () => ({ config: localConfig }));
+  }
+}
+
+export async function syncTeamDb(getLocal) {
+  const remote = await readAllRemote();
+  const local = getLocal();
+  assignMissingIds(local);
+  let confirmed = remote;
+  try {
+    await pushLocalChanges(local, remote);
+    confirmed = await readAllRemote();
+  } catch {
+    confirmed = remote;
+  }
+  return mergeTeamDb(getLocal(), confirmed);
+}
+
+export async function pullTeamDb() {
+  return readAllRemote();
 }
